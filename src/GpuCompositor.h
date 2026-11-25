@@ -12,13 +12,30 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
-#include <cstring>
+#include <cstdio>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace focusglass
 {
+    namespace detail
+    {
+        inline void CheckHresult(HRESULT hr, const char* expression)
+        {
+            if (SUCCEEDED(hr))
+                return;
+
+            char code[16]{};
+            std::snprintf(code, sizeof(code), "0x%08X", static_cast<unsigned int>(hr));
+            throw std::runtime_error(std::string(expression) +
+                " failed with HRESULT " + code + ".");
+        }
+    }
+
+#define FOCUSGLASS_CHECK_HRESULT(expression) \
+    ::focusglass::detail::CheckHresult((expression), #expression)
+
     class GpuCompositor
     {
     public:
@@ -96,9 +113,9 @@ namespace focusglass
             const UINT currentBackBufferIndex = m_swapChain3->GetCurrentBackBufferIndex();
             winrt::com_ptr<ID3D11Texture2D> currentBackBuffer;
             winrt::com_ptr<ID3D11RenderTargetView> currentBackBufferRtv;
-            winrt::check_hresult(m_swapChain->GetBuffer(
+            FOCUSGLASS_CHECK_HRESULT(m_swapChain->GetBuffer(
                 currentBackBufferIndex, __uuidof(ID3D11Texture2D), currentBackBuffer.put_void()));
-            winrt::check_hresult(m_device->CreateRenderTargetView(
+            FOCUSGLASS_CHECK_HRESULT(m_device->CreateRenderTargetView(
                 currentBackBuffer.get(), nullptr, currentBackBufferRtv.put()));
             ID3D11RenderTargetView* target = currentBackBufferRtv.get();
             m_context->OMSetRenderTargets(1, &target, nullptr);
@@ -127,7 +144,7 @@ namespace focusglass
 
             const HRESULT presentResult = m_swapChain->Present(1, 0);
             if (FAILED(presentResult))
-                winrt::check_hresult(presentResult);
+                FOCUSGLASS_CHECK_HRESULT(presentResult);
         }
 
     private:
@@ -198,6 +215,7 @@ VertexOutput VSMain(uint vertexId : SV_VertexID)
         output.uv = float2(0.0, 2.0);
     }
     return output;
+#undef FOCUSGLASS_CHECK_HRESULT
 }
 
 float4 PSDownsample(VertexOutput input) : SV_TARGET
@@ -321,22 +339,22 @@ float4 PSComposite(VertexOutput input) : SV_TARGET
         {
             winrt::com_ptr<ID3DBlob> bytecode;
             CompileShader("VSMain", "vs_4_0", bytecode);
-            winrt::check_hresult(m_device->CreateVertexShader(bytecode->GetBufferPointer(),
+            FOCUSGLASS_CHECK_HRESULT(m_device->CreateVertexShader(bytecode->GetBufferPointer(),
                 bytecode->GetBufferSize(), nullptr, m_vertexShader.put()));
 
             bytecode = nullptr;
             CompileShader("PSDownsample", "ps_4_0", bytecode);
-            winrt::check_hresult(m_device->CreatePixelShader(bytecode->GetBufferPointer(),
+            FOCUSGLASS_CHECK_HRESULT(m_device->CreatePixelShader(bytecode->GetBufferPointer(),
                 bytecode->GetBufferSize(), nullptr, m_downsamplePixelShader.put()));
 
             bytecode = nullptr;
             CompileShader("PSBlur", "ps_4_0", bytecode);
-            winrt::check_hresult(m_device->CreatePixelShader(bytecode->GetBufferPointer(),
+            FOCUSGLASS_CHECK_HRESULT(m_device->CreatePixelShader(bytecode->GetBufferPointer(),
                 bytecode->GetBufferSize(), nullptr, m_blurPixelShader.put()));
 
             bytecode = nullptr;
             CompileShader("PSComposite", "ps_4_0", bytecode);
-            winrt::check_hresult(m_device->CreatePixelShader(bytecode->GetBufferPointer(),
+            FOCUSGLASS_CHECK_HRESULT(m_device->CreatePixelShader(bytecode->GetBufferPointer(),
                 bytecode->GetBufferSize(), nullptr, m_compositePixelShader.put()));
         }
 
@@ -350,7 +368,7 @@ float4 PSComposite(VertexOutput input) : SV_TARGET
             desc.ComparisonFunc = D3D11_COMPARISON_NEVER;
             desc.MinLOD = 0.0f;
             desc.MaxLOD = D3D11_FLOAT32_MAX;
-            winrt::check_hresult(m_device->CreateSamplerState(&desc, m_sampler.put()));
+            FOCUSGLASS_CHECK_HRESULT(m_device->CreateSamplerState(&desc, m_sampler.put()));
         }
 
         void CreateConstantBuffers()
@@ -359,22 +377,22 @@ float4 PSComposite(VertexOutput input) : SV_TARGET
             desc.ByteWidth = sizeof(BlurConstants);
             desc.Usage = D3D11_USAGE_DEFAULT;
             desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-            winrt::check_hresult(m_device->CreateBuffer(&desc, nullptr, m_blurConstants.put()));
+            FOCUSGLASS_CHECK_HRESULT(m_device->CreateBuffer(&desc, nullptr, m_blurConstants.put()));
 
             desc.ByteWidth = sizeof(CompositeConstants);
-            winrt::check_hresult(m_device->CreateBuffer(&desc, nullptr, m_compositeConstants.put()));
+            FOCUSGLASS_CHECK_HRESULT(m_device->CreateBuffer(&desc, nullptr, m_compositeConstants.put()));
         }
 
         void CreateCompositionSwapChain(HWND targetWindow)
         {
             winrt::com_ptr<IDXGIDevice> dxgiDevice;
-            winrt::check_hresult(m_device->QueryInterface(__uuidof(IDXGIDevice), dxgiDevice.put_void()));
+            FOCUSGLASS_CHECK_HRESULT(m_device->QueryInterface(__uuidof(IDXGIDevice), dxgiDevice.put_void()));
 
             winrt::com_ptr<IDXGIAdapter> adapter;
-            winrt::check_hresult(dxgiDevice->GetAdapter(adapter.put()));
+            FOCUSGLASS_CHECK_HRESULT(dxgiDevice->GetAdapter(adapter.put()));
 
             winrt::com_ptr<IDXGIFactory2> factory;
-            winrt::check_hresult(adapter->GetParent(__uuidof(IDXGIFactory2), factory.put_void()));
+            FOCUSGLASS_CHECK_HRESULT(adapter->GetParent(__uuidof(IDXGIFactory2), factory.put_void()));
 
             DXGI_SWAP_CHAIN_DESC1 desc{};
             desc.Width = static_cast<UINT>(m_outputWidth);
@@ -390,23 +408,23 @@ float4 PSComposite(VertexOutput input) : SV_TARGET
             desc.AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED;
             desc.Flags = 0;
 
-            winrt::check_hresult(factory->CreateSwapChainForComposition(
+            FOCUSGLASS_CHECK_HRESULT(factory->CreateSwapChainForComposition(
                 m_device.get(), &desc, nullptr, m_swapChain.put()));
 
             // IDXGISwapChain3 exposes the current writable back-buffer index on Windows 10+.
-            winrt::check_hresult(m_swapChain->QueryInterface(__uuidof(IDXGISwapChain3),
+            FOCUSGLASS_CHECK_HRESULT(m_swapChain->QueryInterface(__uuidof(IDXGISwapChain3),
                 m_swapChain3.put_void()));
 
             winrt::com_ptr<IDXGISwapChain2> swapChain2;
             if (SUCCEEDED(m_swapChain->QueryInterface(__uuidof(IDXGISwapChain2), swapChain2.put_void())))
-                winrt::check_hresult(swapChain2->SetMaximumFrameLatency(1));
+                FOCUSGLASS_CHECK_HRESULT(swapChain2->SetMaximumFrameLatency(1));
 
             winrt::com_ptr<ID3D11Texture2D> backBuffer;
-            winrt::check_hresult(m_swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), backBuffer.put_void()));
-            winrt::check_hresult(m_device->CreateRenderTargetView(backBuffer.get(), nullptr, m_swapChainTarget.put()));
+            FOCUSGLASS_CHECK_HRESULT(m_swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), backBuffer.put_void()));
+            FOCUSGLASS_CHECK_HRESULT(m_device->CreateRenderTargetView(backBuffer.get(), nullptr, m_swapChainTarget.put()));
             const float transparent[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
             m_context->ClearRenderTargetView(m_swapChainTarget.get(), transparent);
-            winrt::check_hresult(m_swapChain->Present(1, 0));
+            FOCUSGLASS_CHECK_HRESULT(m_swapChain->Present(1, 0));
             // Release the initial RTV; Render() reacquires the active flip-model back buffer.
             m_swapChainTarget = nullptr;
 
@@ -416,15 +434,15 @@ float4 PSComposite(VertexOutput input) : SV_TARGET
         void CreateCompositionVisual(HWND targetWindow)
         {
             winrt::com_ptr<IDXGIDevice> dxgiDevice;
-            winrt::check_hresult(m_device->QueryInterface(__uuidof(IDXGIDevice), dxgiDevice.put_void()));
-            winrt::check_hresult(DCompositionCreateDevice(dxgiDevice.get(),
+            FOCUSGLASS_CHECK_HRESULT(m_device->QueryInterface(__uuidof(IDXGIDevice), dxgiDevice.put_void()));
+            FOCUSGLASS_CHECK_HRESULT(DCompositionCreateDevice(dxgiDevice.get(),
                 __uuidof(IDCompositionDevice), m_compositionDevice.put_void()));
-            winrt::check_hresult(m_compositionDevice->CreateTargetForHwnd(
+            FOCUSGLASS_CHECK_HRESULT(m_compositionDevice->CreateTargetForHwnd(
                 targetWindow, TRUE, m_compositionTarget.put()));
-            winrt::check_hresult(m_compositionDevice->CreateVisual(m_visual.put()));
-            winrt::check_hresult(m_visual->SetContent(m_swapChain.get()));
-            winrt::check_hresult(m_compositionTarget->SetRoot(m_visual.get()));
-            winrt::check_hresult(m_compositionDevice->Commit());
+            FOCUSGLASS_CHECK_HRESULT(m_compositionDevice->CreateVisual(m_visual.put()));
+            FOCUSGLASS_CHECK_HRESULT(m_visual->SetContent(m_swapChain.get()));
+            FOCUSGLASS_CHECK_HRESULT(m_compositionTarget->SetRoot(m_visual.get()));
+            FOCUSGLASS_CHECK_HRESULT(m_compositionDevice->Commit());
         }
 
         void CreateRenderTarget(UINT width, UINT height, RenderTarget& target)
@@ -438,9 +456,9 @@ float4 PSComposite(VertexOutput input) : SV_TARGET
             desc.SampleDesc.Count = 1;
             desc.Usage = D3D11_USAGE_DEFAULT;
             desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
-            winrt::check_hresult(m_device->CreateTexture2D(&desc, nullptr, target.texture.put()));
-            winrt::check_hresult(m_device->CreateShaderResourceView(target.texture.get(), nullptr, target.srv.put()));
-            winrt::check_hresult(m_device->CreateRenderTargetView(target.texture.get(), nullptr, target.rtv.put()));
+            FOCUSGLASS_CHECK_HRESULT(m_device->CreateTexture2D(&desc, nullptr, target.texture.put()));
+            FOCUSGLASS_CHECK_HRESULT(m_device->CreateShaderResourceView(target.texture.get(), nullptr, target.srv.put()));
+            FOCUSGLASS_CHECK_HRESULT(m_device->CreateRenderTargetView(target.texture.get(), nullptr, target.rtv.put()));
         }
 
         void EnsureFrameResources(ID3D11Texture2D* capturedFrame)
@@ -470,14 +488,14 @@ float4 PSComposite(VertexOutput input) : SV_TARGET
                 copyDesc.MiscFlags = 0;
                 copyDesc.SampleDesc.Count = 1;
                 copyDesc.SampleDesc.Quality = 0;
-                winrt::check_hresult(m_device->CreateTexture2D(&copyDesc, nullptr, m_sourceCopy.put()));
+                FOCUSGLASS_CHECK_HRESULT(m_device->CreateTexture2D(&copyDesc, nullptr, m_sourceCopy.put()));
 
                 D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
                 srvDesc.Format = sourceDesc.Format;
                 srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
                 srvDesc.Texture2D.MostDetailedMip = 0;
                 srvDesc.Texture2D.MipLevels = 1;
-                winrt::check_hresult(m_device->CreateShaderResourceView(m_sourceCopy.get(), &srvDesc, m_sourceSrv.put()));
+                FOCUSGLASS_CHECK_HRESULT(m_device->CreateShaderResourceView(m_sourceCopy.get(), &srvDesc, m_sourceSrv.put()));
 
                 m_sourceWidth = sourceDesc.Width;
                 m_sourceHeight = sourceDesc.Height;
