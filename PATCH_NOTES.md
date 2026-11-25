@@ -85,3 +85,9 @@ The v0.2.0 code is not yet compiled or runtime-tested on Windows. Validate shade
 - The follow-up build includes the IDXGISwapChain3 current-back-buffer-index fix.
 - Actions artifact `FocusGlass-v0.2.0-windows-x64` was uploaded.
 - This is a native C++ compile/link result only. Runtime HLSL compilation and live DirectComposition/GPU rendering have not been verified.
+
+## Current v1.0.0 configuration
+- Reduced blur strength choices from 10 to 5 levels (1–5).
+- Set the default blur strength to level 1.
+- Kept the existing blur radius curve for levels 1–5; levels 6–10 are no longer available.
+- Product version remains v1.0.0.

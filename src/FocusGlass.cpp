@@ -60,8 +60,8 @@ namespace
     constexpr UINT kWdaExcludeFromCapture = 0x00000011;
     constexpr int kTopSafeAreaPx = 30;       // Keeps the user's macOS-style top bar clear.
     constexpr int kMinBlurLevel = 1;
-    constexpr int kMaxBlurLevel = 10;
-    constexpr int kInitialBlurLevel = 4;
+    constexpr int kMaxBlurLevel = 5;
+    constexpr int kInitialBlurLevel = 1;
 
     HWND g_hostWindow = nullptr;
     HWND g_overlayWindow = nullptr;
@@ -432,7 +432,7 @@ namespace
             AddTrayIcon();
             m_enabled = true;
             ShowOverlay();
-            Log(L"FocusGlass v1.0.0 started. GPU Gaussian blur and DirectComposition are active; blur level defaults to 4/10.");
+            Log(L"FocusGlass v1.0.0 started. GPU Gaussian blur and DirectComposition are active; blur level defaults to 1/5.");
 
             MSG message{};
             while (GetMessageW(&message, nullptr, 0, 0) > 0)
@@ -616,10 +616,10 @@ namespace
 
             m_blurLevel->store(next, std::memory_order_relaxed);
             const std::wstring status = L"FocusGlass - " + std::to_wstring(next) +
-                L"/10 blur (Ctrl+Alt+Up/Down)";
+                L"/5 blur (Ctrl+Alt+Up/Down)";
             UpdateTrayTip(status.c_str());
 
-            const std::wstring message = L"Blur strength: " + std::to_wstring(next) + L"/10";
+            const std::wstring message = L"Blur strength: " + std::to_wstring(next) + L"/5";
             ShowBlurNotification(message.c_str());
             Log(L"Blur strength changed to " + std::to_wstring(next) + L"/10.");
         }

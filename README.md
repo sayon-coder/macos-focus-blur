@@ -27,7 +27,7 @@ FocusGlass is an early native Windows prototype for the macOS-style focus effect
 | Tray icon left-click | Pause / resume |
 | Tray icon right-click | Open menu |
 
-Blur strength has 10 levels. Level 4 is the default and preserves the original v0.1.1 blur radius. Each press adjusts one level; the new radius is applied on the next captured frame. A Windows notification reports the current level. Blur settings currently reset to level 4 when FocusGlass is restarted. You can also right-click the tray icon and choose Increase blur or Decrease blur.
+Blur strength has 5 levels (1–5). Level 1 is the default and provides the lightest blur; levels above 5 are not exposed because they made the backdrop unnecessarily dark. Each press adjusts one level; the new radius is applied on the next captured frame. A Windows notification reports the current level. Blur settings currently reset to level 1 when FocusGlass is restarted. You can also right-click the tray icon and choose Increase blur or Decrease blur.
 
 FocusGlass enforces a **single running instance** using a named Windows mutex. Launching a second copy displays an “already running” message and exits rather than creating another capture overlay. Hotkey registration failures are logged with the Windows error code.
 

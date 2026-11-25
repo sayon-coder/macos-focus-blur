@@ -69,7 +69,7 @@ namespace focusglass
             m_context->CopyResource(m_sourceCopy.get(), capturedFrame);
 
             BlurConstants blur{};
-            const int level = std::clamp(blurLevel, 1, 10);
+            const int level = std::clamp(blurLevel, 1, 5);
             blur.sigma = 1.2f + static_cast<float>(level - 1) * 0.64f;
 
             blur.texelStep[0] = 1.0f / static_cast<float>(m_blurWidth);
