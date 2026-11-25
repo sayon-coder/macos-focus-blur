@@ -41,8 +41,8 @@ namespace
     namespace wdx = winrt::Windows::Graphics::DirectX;
     namespace wd3d = winrt::Windows::Graphics::DirectX::Direct3D11;
 
-    constexpr wchar_t kAppClass[] = L"FocusGlass.HiddenHost.v0.1.2";
-    constexpr wchar_t kOverlayClass[] = L"FocusGlass.DesktopOverlay.v0.1.2";
+    constexpr wchar_t kAppClass[] = L"FocusGlass.HiddenHost.v0.1.3";
+    constexpr wchar_t kOverlayClass[] = L"FocusGlass.DesktopOverlay.v0.1.3";
     constexpr UINT kTrayMessage = WM_APP + 10;
     constexpr UINT kNewFrameMessage = WM_APP + 11;
     constexpr UINT kRefreshMaskMessage = WM_APP + 12;
@@ -566,7 +566,7 @@ namespace
             AddTrayIcon();
             m_enabled = true;
             ShowOverlay();
-            Log(L"FocusGlass v0.1.2 started. Blur level defaults to 4/10; Ctrl+Alt+Up/Down adjusts it. Ctrl+Alt+B toggles; Ctrl+Alt+Q exits.");
+            Log(L"FocusGlass v0.1.3 started. A single-instance guard is active; blur level defaults to 4/10. Blur level defaults to 4/10; Ctrl+Alt+Up/Down adjusts it. Ctrl+Alt+B toggles; Ctrl+Alt+Q exits.");
 
             MSG message{};
             while (GetMessageW(&message, nullptr, 0, 0) > 0)
