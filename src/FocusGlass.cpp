@@ -65,6 +65,7 @@ namespace
 
     HWND g_hostWindow = nullptr;
     HWND g_overlayWindow = nullptr;
+    std::atomic<bool> g_refreshMessagePending{ false };
     constexpr wchar_t kSingleInstanceMutexName[] = L"Local\\FocusGlass.SingleInstance.v1";
 
     std::filesystem::path LogPath()
@@ -368,6 +369,12 @@ namespace
             first.top < second.bottom && first.bottom > second.top;
     }
 
+    bool RectanglesEqual(const RECT& first, const RECT& second)
+    {
+        return first.left == second.left && first.top == second.top &&
+            first.right == second.right && first.bottom == second.bottom;
+    }
+
     struct TopLevelWindowRecord
     {
         HWND hwnd{};
@@ -526,6 +533,11 @@ namespace
                 nullptr, WinEventProc, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
             m_locationHook = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE,
                 nullptr, WinEventProc, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+            m_windowStateHook = SetWinEventHook(EVENT_OBJECT_CREATE, EVENT_OBJECT_REORDER,
+                nullptr, WinEventProc, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+            m_layoutCacheEnabled = m_foregroundHook && m_locationHook && m_windowStateHook;
+            if (!m_layoutCacheEnabled)
+                Log(L"One or more window event hooks could not be installed; using per-frame window detection.");
 
             m_capture = std::make_shared<CaptureEngine>(m_host);
             m_capture->Start(m_monitor);
@@ -548,13 +560,28 @@ namespace
         }
 
     private:
-        static void CALLBACK WinEventProc(HWINEVENTHOOK, DWORD event, HWND hwnd,
+        static void CALLBACK WinEventProc(HWINEVENTHOOK, DWORD event, HWND,
             LONG idObject, LONG idChild, DWORD, DWORD)
         {
-            if (!g_hostWindow) return;
-            if (event == EVENT_SYSTEM_FOREGROUND ||
-                (event == EVENT_OBJECT_LOCATIONCHANGE && idObject == OBJID_WINDOW && idChild == CHILDID_SELF && hwnd == GetForegroundWindow()))
-                PostMessageW(g_hostWindow, kRefreshMaskMessage, 0, 0);
+            if (!g_hostWindow)
+                return;
+
+            const bool foregroundChanged = event == EVENT_SYSTEM_FOREGROUND;
+            const bool topLevelWindowChanged =
+                (event == EVENT_OBJECT_LOCATIONCHANGE ||
+                    (event >= EVENT_OBJECT_CREATE && event <= EVENT_OBJECT_REORDER)) &&
+                idObject == OBJID_WINDOW && idChild == CHILDID_SELF;
+
+            if (!foregroundChanged && !topLevelWindowChanged)
+                return;
+
+            // Window moves can generate many accessibility events. Coalesce them
+            // into one UI-thread refresh instead of growing the message queue.
+            if (!g_refreshMessagePending.exchange(true, std::memory_order_acq_rel))
+            {
+                if (!PostMessageW(g_hostWindow, kRefreshMaskMessage, 0, 0))
+                    g_refreshMessagePending.store(false, std::memory_order_release);
+            }
         }
 
         static LRESULT CALLBACK HostWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -591,6 +618,8 @@ namespace
                 self->RenderLatest();
                 return 0;
             case kRefreshMaskMessage:
+                g_refreshMessagePending.store(false, std::memory_order_release);
+                self->m_layoutDirty = true;
                 self->RenderLatest();
                 return 0;
             case kErrorMessage:
@@ -602,7 +631,10 @@ namespace
                 self->UpdateTrayTip(L"FocusGlass - stopped after capture error");
                 return 0;
             case WM_DISPLAYCHANGE:
-                // v0.2 remains primary-monitor-only; restart after a display topology change.
+                // The capture surface is tied to the original monitor topology.
+                // Invalidate cached geometry and require a restart for a safe reinitialization.
+                self->m_layoutDirty = true;
+                self->m_cachedForegroundWindow = nullptr;
                 self->HideOverlay();
                 self->m_enabled = false;
                 self->m_compositor.reset();
@@ -754,6 +786,8 @@ namespace
 
             try
             {
+                m_layoutDirty = true;
+                m_cachedForegroundWindow = nullptr;
                 m_capture = std::make_shared<CaptureEngine>(m_host);
                 m_capture->Start(m_monitor);
                 m_compositor = std::make_unique<focusglass::GpuCompositor>(
@@ -821,12 +855,27 @@ namespace
                 foregroundRect.right <= m_monitor.bounds.left || foregroundRect.left >= m_monitor.bounds.right ||
                 foregroundRect.bottom <= m_monitor.bounds.top || foregroundRect.top >= m_monitor.bounds.bottom)
             {
-                // v0.2 remains primary-monitor-only. Never apply this overlay when focus is on another monitor.
+                // Never apply this primary-monitor overlay when focus is elsewhere.
+                m_layoutDirty = true;
+                m_cachedForegroundWindow = nullptr;
                 HideOverlay();
                 return;
             }
 
-            const auto layout = BuildWindowLayout(foreground, foregroundRect, m_monitor);
+            // Window geometry and z-order change far less often than captured
+            // desktop frames. Rebuild the layout only when a relevant WinEvent
+            // arrives, foreground changes, or the active frame bounds differ.
+            if (!m_layoutCacheEnabled || m_layoutDirty ||
+                m_cachedForegroundWindow != foreground ||
+                !RectanglesEqual(m_cachedForegroundRect, foregroundRect))
+            {
+                m_cachedLayout = BuildWindowLayout(foreground, foregroundRect, m_monitor);
+                m_cachedForegroundWindow = foreground;
+                m_cachedForegroundRect = foregroundRect;
+                m_layoutDirty = false;
+            }
+
+            const WindowLayout& layout = m_cachedLayout;
             if (!layout.shouldBlur)
             {
                 HideOverlay();
@@ -872,6 +921,8 @@ namespace
             HideOverlay();
             if (m_foregroundHook) UnhookWinEvent(m_foregroundHook);
             if (m_locationHook) UnhookWinEvent(m_locationHook);
+            if (m_windowStateHook) UnhookWinEvent(m_windowStateHook);
+            g_refreshMessagePending.store(false, std::memory_order_release);
             UnregisterHotKey(m_host, kHotkeyToggle);
             UnregisterHotKey(m_host, kHotkeyExit);
             UnregisterHotKey(m_host, kHotkeyIncreaseBlur);
@@ -890,8 +941,14 @@ namespace
         MonitorInfo m_monitor{};
         HWINEVENTHOOK m_foregroundHook{};
         HWINEVENTHOOK m_locationHook{};
+        HWINEVENTHOOK m_windowStateHook{};
         NOTIFYICONDATAW m_tray{};
         std::unique_ptr<focusglass::GpuCompositor> m_compositor;
+        WindowLayout m_cachedLayout{};
+        HWND m_cachedForegroundWindow{};
+        RECT m_cachedForegroundRect{};
+        bool m_layoutCacheEnabled{ false };
+        bool m_layoutDirty{ true };
         bool m_enabled{ false };
         bool m_shutdown{ false };
         bool m_exitRequested{ false };
