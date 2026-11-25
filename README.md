@@ -10,7 +10,8 @@ FocusGlass is an early native Windows prototype for the macOS-style focus effect
 - Runs a 3×3 downsample prefilter and separable horizontal/vertical Gaussian pixel-shader passes on a reduced-resolution texture (maximum blur width: 640 px).
 - Uses DirectComposition with a premultiplied-alpha composition swap chain for the full-screen overlay.
 - Composites the blurred backdrop, foreground cutout, exclusions and shadow entirely on the GPU; there is no CPU pixel readback or GDI full-screen bitmap.
-- Clears only the foreground window and its owned popups, so unrelated topmost/background windows remain blurred to the screen edges.
+- Activates the blur only when a lower-z-order application window geometrically overlaps the active window; side-by-side app windows remain sharp and the overlay stays hidden when no overlap exists.
+- When overlap is detected, blurs the background windows underneath the active window while cutting out independent non-overlapping windows, active-app popups, taskbars and the top menu-bar safe area.
 - Uses a rounded-corner foreground cutout, preserves taskbars and the top 30 px safe area (for the custom menu bar), and adds a medium soft drop shadow around the active window.
 - Uses a layered DirectComposition target with click-through window styles so background applications remain interactive.
 - Excludes the overlay from screen capture. If this cannot be enabled, FocusGlass aborts rather than risking recursive capture.

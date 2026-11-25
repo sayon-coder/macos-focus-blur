@@ -361,37 +361,140 @@ namespace
         return TRUE;
     }
 
-    std::vector<RECT> BuildClearRegions(HWND foreground, const RECT& foregroundRect,
+
+    bool RectanglesIntersect(const RECT& first, const RECT& second)
+    {
+        return first.left < second.right && first.right > second.left &&
+            first.top < second.bottom && first.bottom > second.top;
+    }
+
+    struct TopLevelWindowRecord
+    {
+        HWND hwnd{};
+        RECT bounds{};
+    };
+
+    struct TopLevelWindowContext
+    {
+        HWND foreground{};
+        std::vector<TopLevelWindowRecord>* windows{};
+    };
+
+    BOOL CALLBACK EnumTopLevelApplicationWindows(HWND hwnd, LPARAM parameter)
+    {
+        auto* context = reinterpret_cast<TopLevelWindowContext*>(parameter);
+        if (!context || !context->windows || !IsWindowVisible(hwnd) || IsIconic(hwnd))
+            return TRUE;
+
+        if (hwnd == GetDesktopWindow() || hwnd == GetShellWindow() ||
+            hwnd == g_hostWindow || hwnd == g_overlayWindow)
+            return TRUE;
+
+        // The focused window is always retained. Other candidates must be
+        // independent application windows, not owned dialogs or utility tools.
+        if (hwnd != context->foreground)
+        {
+            const LONG_PTR extendedStyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            if ((extendedStyle & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)) != 0 ||
+                GetWindow(hwnd, GW_OWNER) != nullptr)
+                return TRUE;
+        }
+
+        wchar_t className[128]{};
+        GetClassNameW(hwnd, className, ARRAYSIZE(className));
+        if (wcscmp(className, L"Progman") == 0 ||
+            wcscmp(className, L"WorkerW") == 0 ||
+            wcscmp(className, L"Shell_TrayWnd") == 0 ||
+            wcscmp(className, L"Shell_SecondaryTrayWnd") == 0)
+            return TRUE;
+
+        DWORD cloaked = 0;
+        if (SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) &&
+            cloaked != 0)
+            return TRUE;
+
+        RECT bounds{};
+        if (GetVisibleFrameBounds(hwnd, bounds) &&
+            bounds.right > bounds.left && bounds.bottom > bounds.top)
+            context->windows->push_back({ hwnd, bounds });
+
+        return TRUE;
+    }
+
+    struct WindowLayout
+    {
+        bool shouldBlur{};
+        std::vector<RECT> clearRegions;
+    };
+
+    WindowLayout BuildWindowLayout(HWND foreground, const RECT& foregroundRect,
         const MonitorInfo& monitor)
     {
-        std::vector<RECT> regions;
+        WindowLayout layout;
+        std::vector<TopLevelWindowRecord> windows;
+        TopLevelWindowContext windowContext{ foreground, &windows };
+        EnumWindows(EnumTopLevelApplicationWindows, reinterpret_cast<LPARAM>(&windowContext));
 
-        // Do NOT punch holes for every window above the foreground in z-order.
-        // That was exposing unrelated background windows at the foreground edges.
-        regions.push_back(foregroundRect);
+        // EnumWindows returns top-level windows in z-order (front to back).
+        // Only windows below the active window can be its background.
+        const auto active = std::find_if(windows.begin(), windows.end(),
+            [foreground](const TopLevelWindowRecord& window) { return window.hwnd == foreground; });
+        if (active == windows.end())
+            return layout;
 
-        OwnedPopupContext popupContext{ foreground, &regions };
+        const size_t activeIndex = static_cast<size_t>(std::distance(windows.begin(), active));
+        bool hasOverlappingBackground = false;
+        for (size_t index = activeIndex + 1; index < windows.size(); ++index)
+        {
+            if (RectanglesIntersect(foregroundRect, windows[index].bounds))
+            {
+                hasOverlappingBackground = true;
+                break;
+            }
+        }
+
+        // Side-by-side windows are intentional simultaneous workspaces.
+        // With no lower-z-order app window under the foreground window, do not
+        // create the blur overlay at all.
+        if (!hasOverlappingBackground)
+            return layout;
+
+        layout.shouldBlur = true;
+        layout.clearRegions.push_back(foregroundRect);
+
+        // Preserve independent windows that sit beside the active window.
+        // Only geometrically overlapping windows behind the active window
+        // remain under the blurred backdrop.
+        for (size_t index = activeIndex + 1; index < windows.size(); ++index)
+        {
+            if (!RectanglesIntersect(foregroundRect, windows[index].bounds))
+                layout.clearRegions.push_back(windows[index].bounds);
+        }
+
+        // Keep popups owned by the foreground application sharp.
+        OwnedPopupContext popupContext{ foreground, &layout.clearRegions };
         EnumWindows(EnumOwnedPopups, reinterpret_cast<LPARAM>(&popupContext));
 
         // Keep the Windows taskbar and secondary taskbars crisp.
-        struct TaskbarContext { std::vector<RECT>* regions; } taskbarContext{ &regions };
+        struct TaskbarContext { std::vector<RECT>* regions; } taskbarContext{ &layout.clearRegions };
         EnumWindows([](HWND hwnd, LPARAM param) -> BOOL
         {
             wchar_t className[128]{};
             GetClassNameW(hwnd, className, ARRAYSIZE(className));
-            if (wcscmp(className, L"Shell_TrayWnd") == 0 || wcscmp(className, L"Shell_SecondaryTrayWnd") == 0)
+            if (wcscmp(className, L"Shell_TrayWnd") == 0 ||
+                wcscmp(className, L"Shell_SecondaryTrayWnd") == 0)
             {
-                RECT r{};
-                if (GetWindowRect(hwnd, &r))
-                    reinterpret_cast<TaskbarContext*>(param)->regions->push_back(r);
+                RECT rect{};
+                if (GetWindowRect(hwnd, &rect))
+                    reinterpret_cast<TaskbarContext*>(param)->regions->push_back(rect);
             }
             return TRUE;
         }, reinterpret_cast<LPARAM>(&taskbarContext));
 
         // Preserve the user's custom macOS-style menu bar near the top edge.
-        regions.push_back(RECT{ monitor.bounds.left, monitor.bounds.top,
+        layout.clearRegions.push_back(RECT{ monitor.bounds.left, monitor.bounds.top,
             monitor.bounds.right, std::min(monitor.bounds.bottom, monitor.bounds.top + kTopSafeAreaPx) });
-        return regions;
+        return layout;
     }
 
     class App
@@ -723,11 +826,17 @@ namespace
                 return;
             }
 
-            const auto clearRegions = BuildClearRegions(foreground, foregroundRect, m_monitor);
+            const auto layout = BuildWindowLayout(foreground, foregroundRect, m_monitor);
+            if (!layout.shouldBlur)
+            {
+                HideOverlay();
+                return;
+            }
+
             try
             {
                 // The retained WGC frame keeps the source texture valid until the GPU copy completes.
-                m_compositor->Render(frame->texture.get(), m_monitor.bounds, clearRegions,
+                m_compositor->Render(frame->texture.get(), m_monitor.bounds, layout.clearRegions,
                     m_blurLevel->load(std::memory_order_relaxed));
                 ShowWindow(m_overlay, SW_SHOWNOACTIVATE);
             }
