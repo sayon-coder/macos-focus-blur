@@ -20,6 +20,7 @@
 #include <chrono>
 #include <cstring>
 #include <cstdint>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -61,6 +62,8 @@ namespace
     constexpr int kMinBlurLevel = 1;
     constexpr int kMaxBlurLevel = 10;
     constexpr int kInitialBlurLevel = 4;     // Preserves the original radius-7 default.
+    constexpr int kWindowShadowExtent = 36;
+    constexpr int kWindowShadowVerticalOffset = 6;
     constexpr double kBackdropBrightness = 0.93;
     constexpr unsigned kMaxProcessedFps = 15;
 
@@ -443,50 +446,51 @@ namespace
         return GetWindowRect(hwnd, &rect) != FALSE;
     }
 
-    struct ClearRegionContext
+    bool IsVisibleOwnedPopup(HWND candidate, HWND foreground)
     {
-        HWND foreground{};
-        HWND overlay{};
-        std::vector<RECT>* regions{};
-        bool foundForeground{};
-    };
+        if (candidate == foreground || !IsWindowVisible(candidate) || IsIconic(candidate))
+            return false;
 
-    bool IsWindowEligibleForClear(HWND hwnd)
-    {
-        // Include owned popups and menus: if they are above the foreground window,
-        // they should remain crisp rather than being covered by the backdrop.
-        return IsWindowVisible(hwnd) && !IsIconic(hwnd);
+        // Keep only popups owned by the foreground window (or one of its owned
+        // popups) clear. Unrelated topmost/background windows stay behind the blur.
+        HWND owner = GetWindow(candidate, GW_OWNER);
+        for (int depth = 0; owner && depth < 16; ++depth)
+        {
+            if (owner == foreground) return true;
+            owner = GetWindow(owner, GW_OWNER);
+        }
+        return false;
     }
 
-    BOOL CALLBACK EnumZOrderWindows(HWND hwnd, LPARAM parameter)
+    struct OwnedPopupContext
     {
-        auto* context = reinterpret_cast<ClearRegionContext*>(parameter);
-        if (hwnd == context->overlay) return TRUE;
-        if (hwnd == context->foreground)
-        {
-            RECT rect{};
-            if (GetVisibleFrameBounds(hwnd, rect)) { InflateRect(&rect, 8, 8); context->regions->push_back(rect); }
-            context->foundForeground = true;
-            return FALSE;
-        }
-        if (IsWindowEligibleForClear(hwnd))
-        {
-            RECT rect{};
-            if (GetVisibleFrameBounds(hwnd, rect)) { InflateRect(&rect, 8, 8); context->regions->push_back(rect); }
-        }
+        HWND foreground{};
+        std::vector<RECT>* regions{};
+    };
+
+    BOOL CALLBACK EnumOwnedPopups(HWND hwnd, LPARAM parameter)
+    {
+        auto* context = reinterpret_cast<OwnedPopupContext*>(parameter);
+        if (!IsVisibleOwnedPopup(hwnd, context->foreground))
+            return TRUE;
+
+        RECT rect{};
+        if (GetVisibleFrameBounds(hwnd, rect))
+            context->regions->push_back(rect);
         return TRUE;
     }
 
-    std::vector<RECT> BuildClearRegions(HWND foreground, HWND overlay, const MonitorInfo& monitor)
+    std::vector<RECT> BuildClearRegions(HWND foreground, const RECT& foregroundRect,
+        const MonitorInfo& monitor)
     {
         std::vector<RECT> regions;
-        ClearRegionContext context{ foreground, overlay, &regions, false };
-        EnumWindows(EnumZOrderWindows, reinterpret_cast<LPARAM>(&context));
-        if (!context.foundForeground && foreground && IsWindow(foreground))
-        {
-            RECT rect{};
-            if (GetVisibleFrameBounds(foreground, rect)) { InflateRect(&rect, 8, 8); regions.push_back(rect); }
-        }
+
+        // Do NOT punch holes for every window above the foreground in z-order.
+        // That was exposing unrelated background windows at the foreground edges.
+        regions.push_back(foregroundRect);
+
+        OwnedPopupContext popupContext{ foreground, &regions };
+        EnumWindows(EnumOwnedPopups, reinterpret_cast<LPARAM>(&popupContext));
 
         // Keep the Windows taskbar and secondary taskbars crisp.
         struct TaskbarContext { std::vector<RECT>* regions; } taskbarContext{ &regions };
@@ -509,6 +513,69 @@ namespace
         return regions;
     }
 
+    void ApplyWindowDropShadow(Pixel* output, int width, int height,
+        const RECT& monitorRect, const RECT& windowRect)
+    {
+        // Precomputed tight + wide Gaussian falloff gives a medium, soft shadow.
+        static const std::array<uint8_t, kWindowShadowExtent + 1> opacity = []
+        {
+            std::array<uint8_t, kWindowShadowExtent + 1> values{};
+            for (int d = 0; d <= kWindowShadowExtent; ++d)
+            {
+                const double tight = 0.20 * std::exp(-0.5 * (d * d) / (6.5 * 6.5));
+                const double wide = 0.15 * std::exp(-0.5 * (d * d) / (17.0 * 17.0));
+                values[static_cast<size_t>(d)] = static_cast<uint8_t>(
+                    std::clamp((tight + wide) * 255.0, 0.0, 255.0));
+            }
+            return values;
+        }();
+
+        RECT clipped = windowRect;
+        clipped.left = std::max(clipped.left, monitorRect.left);
+        clipped.top = std::max(clipped.top, monitorRect.top);
+        clipped.right = std::min(clipped.right, monitorRect.right);
+        clipped.bottom = std::min(clipped.bottom, monitorRect.bottom);
+        if (clipped.right <= clipped.left || clipped.bottom <= clipped.top) return;
+
+        RECT shadowShape = clipped;
+        OffsetRect(&shadowShape, 0, kWindowShadowVerticalOffset);
+
+        const int left = std::max(monitorRect.left, shadowShape.left - kWindowShadowExtent) - monitorRect.left;
+        const int top = std::max(monitorRect.top, shadowShape.top - kWindowShadowExtent) - monitorRect.top;
+        const int right = std::min(monitorRect.right, shadowShape.right + kWindowShadowExtent) - monitorRect.left;
+        const int bottom = std::min(monitorRect.bottom, shadowShape.bottom + kWindowShadowExtent) - monitorRect.top;
+
+        const int frameLeft = clipped.left - monitorRect.left;
+        const int frameTop = clipped.top - monitorRect.top;
+        const int frameRight = clipped.right - monitorRect.left;
+        const int frameBottom = clipped.bottom - monitorRect.top;
+
+        for (int y = std::max(0, top); y < std::min(height, bottom); ++y)
+        {
+            auto* row = output + static_cast<size_t>(y) * width;
+            const int screenY = monitorRect.top + y;
+            const int dy = std::max({ shadowShape.top - screenY, 0, screenY - (shadowShape.bottom - 1) });
+            for (int x = std::max(0, left); x < std::min(width, right); ++x)
+            {
+                if (x >= frameLeft && x < frameRight && y >= frameTop && y < frameBottom)
+                    continue;
+
+                const int screenX = monitorRect.left + x;
+                const int dx = std::max({ shadowShape.left - screenX, 0, screenX - (shadowShape.right - 1) });
+                const int distance = static_cast<int>(std::sqrt(static_cast<double>(dx * dx + dy * dy)));
+                if (distance > kWindowShadowExtent) continue;
+
+                const unsigned shade = opacity[static_cast<size_t>(distance)];
+                if (shade == 0) continue;
+                const unsigned keep = 255 - shade;
+                auto& pixel = row[x];
+                pixel.b = static_cast<uint8_t>((pixel.b * keep) / 255);
+                pixel.g = static_cast<uint8_t>((pixel.g * keep) / 255);
+                pixel.r = static_cast<uint8_t>((pixel.r * keep) / 255);
+            }
+        }
+    }
+
     void ClearAlphaInRect(Pixel* output, int width, int height, const RECT& monitorRect, RECT rect)
     {
         rect.left = std::max(rect.left, monitorRect.left);
@@ -525,6 +592,46 @@ namespace
             auto* row = output + static_cast<size_t>(y) * width;
             for (int x = x0; x < x1 && x < width; ++x)
             {
+                row[x].b = row[x].g = row[x].r = 0;
+                row[x].a = 0;
+            }
+        }
+    }
+
+    void ClearAlphaInRoundedRect(Pixel* output, int width, int height,
+        const RECT& monitorRect, RECT rect, int cornerRadius)
+    {
+        rect.left = std::max(rect.left, monitorRect.left);
+        rect.top = std::max(rect.top, monitorRect.top);
+        rect.right = std::min(rect.right, monitorRect.right);
+        rect.bottom = std::min(rect.bottom, monitorRect.bottom);
+        if (rect.right <= rect.left || rect.bottom <= rect.top) return;
+
+        const int x0 = rect.left - monitorRect.left;
+        const int x1 = rect.right - monitorRect.left;
+        const int y0 = rect.top - monitorRect.top;
+        const int y1 = rect.bottom - monitorRect.top;
+        const int radius = std::clamp(cornerRadius, 0, std::min(x1 - x0, y1 - y0) / 2);
+        const int radiusSquared = radius * radius;
+
+        for (int y = y0; y < y1 && y < height; ++y)
+        {
+            auto* row = output + static_cast<size_t>(y) * width;
+            for (int x = x0; x < x1 && x < width; ++x)
+            {
+                int cornerDx = 0;
+                int cornerDy = 0;
+                if (radius > 0)
+                {
+                    if (x < x0 + radius) cornerDx = x0 + radius - 1 - x;
+                    else if (x >= x1 - radius) cornerDx = x - (x1 - radius);
+                    if (y < y0 + radius) cornerDy = y0 + radius - 1 - y;
+                    else if (y >= y1 - radius) cornerDy = y - (y1 - radius);
+                }
+                if (cornerDx > 0 && cornerDy > 0 &&
+                    cornerDx * cornerDx + cornerDy * cornerDy > radiusSquared)
+                    continue;
+
                 row[x].b = row[x].g = row[x].r = 0;
                 row[x].a = 0;
             }
@@ -872,7 +979,7 @@ namespace
                 return;
             }
             RECT foregroundRect{};
-            if (!GetWindowRect(foreground, &foregroundRect) ||
+            if (!GetVisibleFrameBounds(foreground, foregroundRect) ||
                 foregroundRect.right <= m_monitor.bounds.left || foregroundRect.left >= m_monitor.bounds.right ||
                 foregroundRect.bottom <= m_monitor.bounds.top || foregroundRect.top >= m_monitor.bounds.bottom)
             {
@@ -881,9 +988,15 @@ namespace
                 return;
             }
 
-            auto regions = BuildClearRegions(foreground, m_overlay, m_monitor);
-            for (const auto& region : regions)
-                ClearAlphaInRect(output, width, height, m_monitor.bounds, region);
+            // Draw a medium soft shadow over the blurred backdrop, then cut a rounded
+            // transparent opening so the active foreground window remains sharp.
+            ApplyWindowDropShadow(output, width, height, m_monitor.bounds, foregroundRect);
+
+            auto regions = BuildClearRegions(foreground, foregroundRect, m_monitor);
+            if (!regions.empty())
+                ClearAlphaInRoundedRect(output, width, height, m_monitor.bounds, regions.front(), 10);
+            for (size_t i = 1; i < regions.size(); ++i)
+                ClearAlphaInRect(output, width, height, m_monitor.bounds, regions[i]);
 
             POINT destination{ m_monitor.bounds.left, m_monitor.bounds.top };
             POINT source{ 0, 0 };

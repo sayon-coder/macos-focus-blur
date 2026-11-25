@@ -35,3 +35,15 @@ The v0.1.2 source changes have not yet been compiled on Windows. The user must r
 - Preserved the v0.1.2 blur strength controls and defaults.
 
 The v0.1.3 change has not yet been compiled on Windows or runtime-tested.
+
+
+# FocusGlass v0.1.4 — Foreground mask, shadow, and portable Release runtime
+
+- Fixed edge leakage: the previous mask cleared every window enumerated before the foreground window in z-order. v0.1.4 clears only the foreground window and its owned popups, leaving unrelated background/topmost windows covered by blur.
+- Uses visible DWM frame bounds and a rounded-corner transparent foreground cutout.
+- Added a medium soft drop shadow over the blurred backdrop, offset slightly downward.
+- Release now links the MSVC runtime statically (/MT). This removes the separate VC++ Redistributable dependency from the Release executable; Windows OS APIs remain external system dependencies.
+- Debug configuration retains its developer runtime.
+- No startup registration or installer has been added.
+
+The user must rebuild v0.1.4 on Windows and test the new mask and shadow. This version has not yet been compiled or runtime-tested.

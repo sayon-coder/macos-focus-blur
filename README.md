@@ -10,8 +10,8 @@ FocusGlass is an early native Windows prototype for the macOS-style focus effect
 - Copies frames through Direct3D 11, then creates a reduced-resolution blur buffer (maximum width: 640 px).
 - Applies three horizontal/vertical box-blur passes on the CPU, capped at approximately 15 processed frames per second.
 - Displays the blurred image through a click-through layered overlay.
-- Clears a rectangular opening for the foreground window, leaving the real foreground app sharp and interactive.
-- Also clears visible windows above the foreground window, taskbars, and the top 30 px safe area (for the user's custom menu bar).
+- Clears only the foreground window and its owned popups, so unrelated topmost/background windows remain blurred to the screen edges.
+- Uses a rounded-corner foreground cutout, preserves taskbars and the top 30 px safe area (for the custom menu bar), and adds a medium soft drop shadow around the active window.
 - Excludes the overlay from screen capture. If this cannot be enabled, FocusGlass aborts rather than risking recursive capture.
 - Provides a tray icon and global keyboard shortcuts.
 
@@ -40,7 +40,7 @@ Logs are written to `%LOCALAPPDATA%\FocusGlass\FocusGlass.log`.
 - Windows 10/11 SDK 10.0.20348.0 or newer (the build script selects the newest suitable SDK).
 - C++/WinRT projection headers included with the Windows SDK. No separate NuGet restore is required.
 
-The application is native C++/WinRT and does **not** require the .NET Desktop Runtime.
+The application is native C++/WinRT and does **not** require the .NET Desktop Runtime. Release builds statically link the MSVC C/C++ runtime (`/MT`), so the compiled Release executable does not require Visual Studio Build Tools or a separately installed Visual C++ Redistributable. Build Tools are required only to compile new versions. Windows system libraries and the supported Windows version are still required.
 
 ## Build
 
@@ -68,13 +68,13 @@ The user-provided build log confirms a successful v0.1.1 Release x64 build using
 
 Output: `artifacts\x64\Release\FocusGlass.exe`.
 
-This verifies compilation only. Runtime visual correctness, flicker, capture stability, performance, and multi-window behaviour have not yet been verified. The v0.1.2 blur-level controls and v0.1.3 single-instance guard have been added to source but await fresh Windows builds and runtime testing.
+This verifies compilation of v0.1.1 only. The v0.1.4 mask correction, drop shadow, and static-runtime configuration must be rebuilt and tested on Windows before use.
 
 ## Known limitations
 
 - Primary monitor only. A display-topology change hides the overlay and requires restart.
 - CPU-based blur after Direct3D capture/readback; downsampled and capped at 15 FPS. Performance must be measured on real hardware.
-- No settings window yet. Blur intensity is adjustable with the global shortcuts or tray menu; brightness, top safe-area height, and frame cap remain source constants.
+- No settings window yet. Blur intensity is adjustable with the global shortcuts or tray menu; shadow radius/strength, brightness, top safe-area height, and frame cap remain source constants.
 - Focus transitions are immediate; fades are not implemented.
 - The foreground cutout is rectangular. Rounded corners, multi-monitor support, and per-app exclusions are future work.
 - Protected video, secure desktop/UAC prompts, lock screen, and some elevated or exclusive-fullscreen apps may not capture normally.
@@ -107,3 +107,13 @@ If the process becomes unresponsive, end `FocusGlass.exe` from Task Manager; its
 3. Move blur passes to a Direct3D 11 shader if CPU usage or frame pacing requires it.
 4. Add multi-monitor support, settings, exclusions, and installer packaging.
 5. Evaluate a Windhawk Tool Mod wrapper only after the standalone engine is stable.
+
+
+## v0.1.4 changes
+
+- Background windows no longer get cut out just because they appear above the active window in global z-order.
+- Only the foreground window, its owned popups, taskbars, and configured top safe area are kept clear.
+- Added a medium, offset, two-scale Gaussian-style drop shadow over the blurred backdrop.
+- The foreground cutout uses rounded corners.
+- Release configuration uses the statically linked MSVC runtime (/MT) to make the executable portable without Visual Studio Build Tools or a separately installed VC++ Redistributable.
+- No installer or auto-start registration is added in this version.
