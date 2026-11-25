@@ -109,14 +109,17 @@ namespace focusglass
 
             m_context->UpdateSubresource(m_compositeConstants.get(), 0, nullptr, &composite, 0, 0);
 
-            // Flip-model swap chains rotate buffers on Present. Reuse the RTV
-            // created for each buffer during initialization to avoid COM allocations
-            // and driver validation on every captured frame.
+            // Follow the previously validated composition path: acquire the current
+            // flip-model buffer and create its RTV for this frame. Avoid bulk RTV
+            // creation during startup, which returned E_INVALIDARG on the target PC.
             const UINT currentBackBufferIndex = m_swapChain3->GetCurrentBackBufferIndex();
-            if (currentBackBufferIndex >= m_swapChainRtvs.size() ||
-                !m_swapChainRtvs[currentBackBufferIndex])
-                throw std::runtime_error("DXGI returned an invalid composition swap-chain buffer index.");
-            ID3D11RenderTargetView* target = m_swapChainRtvs[currentBackBufferIndex].get();
+            winrt::com_ptr<ID3D11Texture2D> currentBackBuffer;
+            winrt::com_ptr<ID3D11RenderTargetView> currentBackBufferRtv;
+            FOCUSGLASS_CHECK_HRESULT(m_swapChain->GetBuffer(
+                currentBackBufferIndex, __uuidof(ID3D11Texture2D), currentBackBuffer.put_void()));
+            FOCUSGLASS_CHECK_HRESULT(m_device->CreateRenderTargetView(
+                currentBackBuffer.get(), nullptr, currentBackBufferRtv.put()));
+            ID3D11RenderTargetView* target = currentBackBufferRtv.get();
             m_context->OMSetRenderTargets(1, &target, nullptr);
             D3D11_VIEWPORT viewport{};
             viewport.Width = static_cast<float>(m_outputWidth);
@@ -148,7 +151,6 @@ namespace focusglass
 
     private:
         static constexpr UINT kMaxClearRects = 32;
-        static constexpr UINT kSwapChainBufferCount = 2;
 
         struct RenderTarget
         {
@@ -401,7 +403,7 @@ float4 PSComposite(VertexOutput input) : SV_TARGET
             desc.SampleDesc.Count = 1;
             desc.SampleDesc.Quality = 0;
             desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-            desc.BufferCount = kSwapChainBufferCount;
+            desc.BufferCount = 2;
             desc.Scaling = DXGI_SCALING_STRETCH;
             desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
             desc.AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED;
@@ -417,17 +419,15 @@ float4 PSComposite(VertexOutput input) : SV_TARGET
             // Keep the default DXGI frame queue. SetMaximumFrameLatency requires
             // DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT, which this composition
             // swap chain intentionally does not enable.
+            winrt::com_ptr<ID3D11Texture2D> backBuffer;
+            FOCUSGLASS_CHECK_HRESULT(m_swapChain->GetBuffer(
+                0, __uuidof(ID3D11Texture2D), backBuffer.put_void()));
+            FOCUSGLASS_CHECK_HRESULT(m_device->CreateRenderTargetView(
+                backBuffer.get(), nullptr, m_swapChainTarget.put()));
             const float transparent[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-            for (UINT index = 0; index < kSwapChainBufferCount; ++index)
-            {
-                winrt::com_ptr<ID3D11Texture2D> backBuffer;
-                FOCUSGLASS_CHECK_HRESULT(m_swapChain->GetBuffer(
-                    index, __uuidof(ID3D11Texture2D), backBuffer.put_void()));
-                FOCUSGLASS_CHECK_HRESULT(m_device->CreateRenderTargetView(
-                    backBuffer.get(), nullptr, m_swapChainRtvs[index].put()));
-                m_context->ClearRenderTargetView(m_swapChainRtvs[index].get(), transparent);
-            }
+            m_context->ClearRenderTargetView(m_swapChainTarget.get(), transparent);
             FOCUSGLASS_CHECK_HRESULT(m_swapChain->Present(1, 0));
+            m_swapChainTarget = nullptr;
 
             (void)targetWindow;
         }
@@ -565,7 +565,7 @@ float4 PSComposite(VertexOutput input) : SV_TARGET
 
         winrt::com_ptr<IDXGISwapChain1> m_swapChain;
         winrt::com_ptr<IDXGISwapChain3> m_swapChain3;
-        std::array<winrt::com_ptr<ID3D11RenderTargetView>, kSwapChainBufferCount> m_swapChainRtvs;
+        winrt::com_ptr<ID3D11RenderTargetView> m_swapChainTarget;
         winrt::com_ptr<IDCompositionDevice> m_compositionDevice;
         winrt::com_ptr<IDCompositionTarget> m_compositionTarget;
         winrt::com_ptr<IDCompositionVisual> m_visual;
