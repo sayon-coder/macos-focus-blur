@@ -92,12 +92,12 @@ namespace focusglass
 
             m_context->UpdateSubresource(m_compositeConstants.get(), 0, nullptr, &composite, 0, 0);
 
-            // Flip-model swap chains rotate buffer indices on Present. Reacquire buffer 0
-            // for each frame instead of keeping an RTV to the previous back buffer.
+            // Flip-model swap chains rotate buffers on Present. Render to the current index.
+            const UINT currentBackBufferIndex = m_swapChain3->GetCurrentBackBufferIndex();
             winrt::com_ptr<ID3D11Texture2D> currentBackBuffer;
             winrt::com_ptr<ID3D11RenderTargetView> currentBackBufferRtv;
             winrt::check_hresult(m_swapChain->GetBuffer(
-                0, __uuidof(ID3D11Texture2D), currentBackBuffer.put_void()));
+                currentBackBufferIndex, __uuidof(ID3D11Texture2D), currentBackBuffer.put_void()));
             winrt::check_hresult(m_device->CreateRenderTargetView(
                 currentBackBuffer.get(), nullptr, currentBackBufferRtv.put()));
             ID3D11RenderTargetView* target = currentBackBufferRtv.get();
@@ -393,6 +393,10 @@ float4 PSComposite(VertexOutput input) : SV_TARGET
             winrt::check_hresult(factory->CreateSwapChainForComposition(
                 m_device.get(), &desc, nullptr, m_swapChain.put()));
 
+            // IDXGISwapChain3 exposes the current writable back-buffer index on Windows 10+.
+            winrt::check_hresult(m_swapChain->QueryInterface(__uuidof(IDXGISwapChain3),
+                m_swapChain3.put_void()));
+
             winrt::com_ptr<IDXGISwapChain2> swapChain2;
             if (SUCCEEDED(m_swapChain->QueryInterface(__uuidof(IDXGISwapChain2), swapChain2.put_void())))
                 winrt::check_hresult(swapChain2->SetMaximumFrameLatency(1));
@@ -541,6 +545,7 @@ float4 PSComposite(VertexOutput input) : SV_TARGET
         winrt::com_ptr<ID3D11Buffer> m_compositeConstants;
 
         winrt::com_ptr<IDXGISwapChain1> m_swapChain;
+        winrt::com_ptr<IDXGISwapChain3> m_swapChain3;
         winrt::com_ptr<ID3D11RenderTargetView> m_swapChainTarget;
         winrt::com_ptr<IDCompositionDevice> m_compositionDevice;
         winrt::com_ptr<IDCompositionTarget> m_compositionTarget;

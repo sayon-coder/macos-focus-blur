@@ -70,3 +70,10 @@ Not yet compiled on Windows. Rebuild and report any remaining compiler diagnosti
 - The build script now searches both Program Files and Program Files (x86) for VS 2022 installations, allowing it to work on more Windows CI images.
 
 The v0.2.0 code is not yet compiled or runtime-tested on Windows. Validate shader compilation, DComp creation, click-through hit-testing, capture exclusion, alpha composition, edge mask, shadow, CPU/GPU use, frame pacing, and pause/exit controls.
+
+
+## v0.2.0 flip-model back-buffer correction
+
+- Queries `IDXGISwapChain3::GetCurrentBackBufferIndex()` before rendering each frame.
+- Binds the RTV to the currently writable flip-model back buffer rather than assuming buffer index zero remains writable after Present.
+- Requires the Windows 10+ IDXGISwapChain3 interface already available on the project's Windows 10 2004+ minimum target.
