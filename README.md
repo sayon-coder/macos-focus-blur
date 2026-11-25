@@ -1,8 +1,8 @@
-# FocusGlass v0.2.0 — Direct3D 11 GPU focus-blur prototype
+# FocusGlass v1.0.0 — Direct3D 11 GPU focus blur
 
 FocusGlass is an early native Windows prototype for the macOS-style focus effect: the foreground application stays sharp while the rest of the primary display is blurred.
 
-> **Status:** GPU-rendering prototype. v0.1.5 was built and tested on the target PC. v0.2.0 compiles successfully in the repository's Windows Server 2022 / MSVC v143 / Windows SDK 10.0.26100 GitHub Actions build. Runtime HLSL compilation, DirectComposition rendering, click-through, frame pacing and GPU load still require a real desktop test.
+> **Product version:** v1.0.0. Bug fixes do not increment this version. **Validation:** The Windows x64 C++ build passes in GitHub Actions. GPU shaders compile dynamically at application startup; the latest source fixes a shader parser error, but successful GPU rendering and runtime stability still require verification on the target desktop.
 
 ## Current implementation
 
