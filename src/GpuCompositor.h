@@ -215,7 +215,6 @@ VertexOutput VSMain(uint vertexId : SV_VertexID)
         output.uv = float2(0.0, 2.0);
     }
     return output;
-#undef FOCUSGLASS_CHECK_HRESULT
 }
 
 float4 PSDownsample(VertexOutput input) : SV_TARGET
@@ -580,4 +579,5 @@ float4 PSComposite(VertexOutput input) : SV_TARGET
         RenderTarget m_horizontalTarget;
         RenderTarget m_blurTarget;
     };
+#undef FOCUSGLASS_CHECK_HRESULT
 }
