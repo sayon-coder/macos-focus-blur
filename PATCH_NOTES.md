@@ -77,3 +77,11 @@ The v0.2.0 code is not yet compiled or runtime-tested on Windows. Validate shade
 - Queries `IDXGISwapChain3::GetCurrentBackBufferIndex()` before rendering each frame.
 - Binds the RTV to the currently writable flip-model back buffer rather than assuming buffer index zero remains writable after Present.
 - Requires the Windows 10+ IDXGISwapChain3 interface already available on the project's Windows 10 2004+ minimum target.
+
+
+## v0.2.0 CI compile verification
+
+- GitHub Actions Release x64 build succeeded on Windows Server 2022 (10.0.20348), Visual Studio 2022 Build Tools, MSVC v143, Windows SDK 10.0.26100.0.
+- The follow-up build includes the IDXGISwapChain3 current-back-buffer-index fix.
+- Actions artifact `FocusGlass-v0.2.0-windows-x64` was uploaded.
+- This is a native C++ compile/link result only. Runtime HLSL compilation and live DirectComposition/GPU rendering have not been verified.

@@ -2,7 +2,7 @@
 
 FocusGlass is an early native Windows prototype for the macOS-style focus effect: the foreground application stays sharp while the rest of the primary display is blurred.
 
-> **Status:** Source-code proof of concept. v0.1.1–v0.1.3 were built on the target Windows PC and v0.1.3 demonstrated the basic blur. The v0.1.4 edge-mask correction, window shadow, and static-runtime change still require a fresh Windows build and runtime test.
+> **Status:** GPU-rendering prototype. v0.1.5 was built and tested on the target PC. v0.2.0 compiles successfully in the repository's Windows Server 2022 / MSVC v143 / Windows SDK 10.0.26100 GitHub Actions build. Runtime HLSL compilation, DirectComposition rendering, click-through, frame pacing and GPU load still require a real desktop test.
 
 ## Current implementation
 
@@ -126,6 +126,12 @@ If the process becomes unresponsive, end `FocusGlass.exe` from Task Manager; its
 - No rendering behaviour or shadow tuning was intentionally changed in this patch.
 - The v0.1.5 changes need a fresh Windows Release build and runtime test.
 
+
+## Windows CI build result
+
+The v0.2.0 Release x64 native C++ build passed in GitHub Actions on Windows Server 2022 using Visual Studio 2022 Build Tools, MSVC v143 and Windows SDK 10.0.26100.0. The workflow uploaded `FocusGlass-v0.2.0-windows-x64` as an Actions artifact.
+
+The CI build does not launch the GUI, compile the embedded HLSL at runtime, or test DirectComposition, the layered-window click-through behavior, GPU driver interaction, frame pacing or visual output. Those checks remain for the target Windows laptop.
 
 ## v0.2.0 GPU architecture and verification
 
