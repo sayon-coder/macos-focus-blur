@@ -1,8 +1,8 @@
-# FocusGlass v0.1.3 — Windows focus-blur proof of concept
+# FocusGlass v0.1.4 — Windows focus-blur proof of concept
 
 FocusGlass is an early native Windows prototype for the macOS-style focus effect: the foreground application stays sharp while the rest of the primary display is blurred.
 
-> **Status:** Source-code proof of concept. v0.1.1 has successfully compiled on the target Windows PC in Release x64. Runtime blur behaviour has not yet been validated; treat this build as experimental.
+> **Status:** Source-code proof of concept. v0.1.1–v0.1.3 were built on the target Windows PC and v0.1.3 demonstrated the basic blur. The v0.1.4 edge-mask correction, window shadow, and static-runtime change still require a fresh Windows build and runtime test.
 
 ## Current implementation
 
@@ -40,7 +40,7 @@ Logs are written to `%LOCALAPPDATA%\FocusGlass\FocusGlass.log`.
 - Windows 10/11 SDK 10.0.20348.0 or newer (the build script selects the newest suitable SDK).
 - C++/WinRT projection headers included with the Windows SDK. No separate NuGet restore is required.
 
-The application is native C++/WinRT and does **not** require the .NET Desktop Runtime. Release builds statically link the MSVC C/C++ runtime (`/MT`), so the compiled Release executable does not require Visual Studio Build Tools or a separately installed Visual C++ Redistributable. Build Tools are required only to compile new versions. Windows system libraries and the supported Windows version are still required.
+The application is native C++/WinRT and does **not** require the .NET Desktop Runtime. Release builds statically link the MSVC C/C++ runtime (`/MT`), so the compiled Release executable does not require Visual Studio Build Tools or a separately installed Visual C++ Redistributable. Build Tools are required only to compile new versions, not to launch an already-built Release executable. Windows system libraries and the supported Windows version are still required. Static linking increases the executable size and means FocusGlass must be rebuilt and redistributed to pick up future MSVC runtime security fixes.
 
 ## Build
 
