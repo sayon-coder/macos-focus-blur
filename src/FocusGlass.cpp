@@ -554,14 +554,22 @@ namespace
         {
             auto* row = output + static_cast<size_t>(y) * width;
             const int screenY = monitorRect.top + y;
-            const int dy = std::max({ shadowShape.top - screenY, 0, screenY - (shadowShape.bottom - 1) });
+            const int dy = std::max<int>({
+                static_cast<int>(shadowShape.top) - screenY,
+                0,
+                screenY - (static_cast<int>(shadowShape.bottom) - 1)
+            });
             for (int x = std::max(0, left); x < std::min(width, right); ++x)
             {
                 if (x >= frameLeft && x < frameRight && y >= frameTop && y < frameBottom)
                     continue;
 
                 const int screenX = monitorRect.left + x;
-                const int dx = std::max({ shadowShape.left - screenX, 0, screenX - (shadowShape.right - 1) });
+                const int dx = std::max<int>({
+                    static_cast<int>(shadowShape.left) - screenX,
+                    0,
+                    screenX - (static_cast<int>(shadowShape.right) - 1)
+                });
                 const int distance = static_cast<int>(std::sqrt(static_cast<double>(dx * dx + dy * dy)));
                 if (distance > kWindowShadowExtent) continue;
 

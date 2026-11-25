@@ -1,4 +1,4 @@
-# FocusGlass v0.1.4 — Windows focus-blur proof of concept
+# FocusGlass v0.1.5 — Windows focus-blur proof of concept
 
 FocusGlass is an early native Windows prototype for the macOS-style focus effect: the foreground application stays sharp while the rest of the primary display is blurred.
 
@@ -117,3 +117,10 @@ If the process becomes unresponsive, end `FocusGlass.exe` from Task Manager; its
 - The foreground cutout uses rounded corners.
 - Release configuration uses the statically linked MSVC runtime (/MT) to make the executable portable without Visual Studio Build Tools or a separately installed VC++ Redistributable.
 - No installer or auto-start registration is added in this version.
+
+
+## v0.1.5 build fix
+
+- Fixed MSVC compilation errors in the shadow distance calculations by explicitly converting Win32 `LONG` frame coordinates to `int` before calling `std::max<int>`.
+- No rendering behaviour or shadow tuning was intentionally changed in this patch.
+- The v0.1.5 changes need a fresh Windows Release build and runtime test.

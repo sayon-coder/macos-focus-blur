@@ -47,3 +47,12 @@ The v0.1.3 change has not yet been compiled on Windows or runtime-tested.
 - No startup registration or installer has been added.
 
 The user must rebuild v0.1.4 on Windows and test the new mask and shadow. This version has not yet been compiled or runtime-tested.
+
+
+# FocusGlass v0.1.5 — MSVC LONG/int shadow compile fix
+
+- Explicitly typed the shadow edge-distance calculations as `std::max<int>`.
+- Cast Win32 RECT LONG coordinates to int at the arithmetic boundary to avoid mixed-type initializer-list deduction errors C2672/C2737 in MSVC.
+- No intended change to shadow shape, blur intensity, or foreground mask.
+
+Not yet compiled on Windows. Rebuild and report any remaining compiler diagnostics.
