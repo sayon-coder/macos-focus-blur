@@ -56,3 +56,17 @@ The user must rebuild v0.1.4 on Windows and test the new mask and shadow. This v
 - No intended change to shadow shape, blur intensity, or foreground mask.
 
 Not yet compiled on Windows. Rebuild and report any remaining compiler diagnostics.
+
+
+# FocusGlass v0.2.0 — GPU rendering pipeline
+
+- Replaced CPU staging readback, CPU box-blur passes, and UpdateLayeredWindow/GDI DIB composition.
+- Capture callbacks retain the latest WGC frame and coalesce notifications. GPU context work remains on the UI/compositor thread.
+- Added a GPU 3×3 prefilter/downsample and separable horizontal/vertical Gaussian pixel shaders.
+- Added a final shader that composites blurred desktop pixels, rounded foreground cutout, preserved clear regions and medium shadow.
+- Added a premultiplied-alpha DirectComposition swap chain.
+- DirectComposition is hosted in a layered, click-through window; layered style and constant alpha are initialized for reliable pass-through.
+- Added dcomp.lib and d3dcompiler.lib link dependencies. Release remains /MT.
+- The build script now searches both Program Files and Program Files (x86) for VS 2022 installations, allowing it to work on more Windows CI images.
+
+The v0.2.0 code is not yet compiled or runtime-tested on Windows. Validate shader compilation, DComp creation, click-through hit-testing, capture exclusion, alpha composition, edge mask, shadow, CPU/GPU use, frame pacing, and pause/exit controls.

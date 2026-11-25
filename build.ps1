@@ -4,12 +4,17 @@ $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $sln = Join-Path $root 'FocusGlass.sln'
 
 # Locate the VS 2022 Build Tools installation.
-$vsRoots = @(
-    (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\2022\BuildTools'),
-    (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\2022\Community'),
-    (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\2022\Professional'),
-    (Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\2022\Enterprise')
-) | Where-Object { $_ -and (Test-Path $_) }
+$programFilesRoots = @(
+    [Environment]::GetFolderPath('ProgramFiles'),
+    [Environment]::GetFolderPath('ProgramFilesX86')
+) | Where-Object { $_ } | Select-Object -Unique
+
+$vsRoots = foreach ($programFilesRoot in $programFilesRoots) {
+    foreach ($edition in @('BuildTools', 'Community', 'Professional', 'Enterprise')) {
+        $candidate = Join-Path $programFilesRoot "Microsoft Visual Studio\2022\$edition"
+        if (Test-Path $candidate) { $candidate }
+    }
+}
 
 $msbuild = $null
 $selectedVs = $null

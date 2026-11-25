@@ -1,4 +1,4 @@
-# FocusGlass v0.1.5 — Windows focus-blur proof of concept
+# FocusGlass v0.2.0 — Direct3D 11 GPU focus-blur prototype
 
 FocusGlass is an early native Windows prototype for the macOS-style focus effect: the foreground application stays sharp while the rest of the primary display is blurred.
 
@@ -6,12 +6,13 @@ FocusGlass is an early native Windows prototype for the macOS-style focus effect
 
 ## Current implementation
 
-- Captures the primary monitor with Windows Graphics Capture.
-- Copies frames through Direct3D 11, then creates a reduced-resolution blur buffer (maximum width: 640 px).
-- Applies three horizontal/vertical box-blur passes on the CPU, capped at approximately 15 processed frames per second.
-- Displays the blurred image through a click-through layered overlay.
+- Captures the primary monitor with Windows Graphics Capture and retains the captured Direct3D texture on the GPU.
+- Runs a 3×3 downsample prefilter and separable horizontal/vertical Gaussian pixel-shader passes on a reduced-resolution texture (maximum blur width: 640 px).
+- Uses DirectComposition with a premultiplied-alpha composition swap chain for the full-screen overlay.
+- Composites the blurred backdrop, foreground cutout, exclusions and shadow entirely on the GPU; there is no CPU pixel readback or GDI full-screen bitmap.
 - Clears only the foreground window and its owned popups, so unrelated topmost/background windows remain blurred to the screen edges.
 - Uses a rounded-corner foreground cutout, preserves taskbars and the top 30 px safe area (for the custom menu bar), and adds a medium soft drop shadow around the active window.
+- Uses a layered DirectComposition target with click-through window styles so background applications remain interactive.
 - Excludes the overlay from screen capture. If this cannot be enabled, FocusGlass aborts rather than risking recursive capture.
 - Provides a tray icon and global keyboard shortcuts.
 
@@ -124,3 +125,18 @@ If the process becomes unresponsive, end `FocusGlass.exe` from Task Manager; its
 - Fixed MSVC compilation errors in the shadow distance calculations by explicitly converting Win32 `LONG` frame coordinates to `int` before calling `std::max<int>`.
 - No rendering behaviour or shadow tuning was intentionally changed in this patch.
 - The v0.1.5 changes need a fresh Windows Release build and runtime test.
+
+
+## v0.2.0 GPU architecture and verification
+
+The GPU renderer uses a small number of full-screen D3D11 passes:
+1. GPU copy from the WGC frame texture into a compositor-owned shader-resource texture.
+2. A 3×3 GPU prefilter/downsample into a texture no wider than 640 px.
+3. A horizontal Gaussian shader pass.
+4. A vertical Gaussian shader pass.
+5. A final composite shader that outputs the blur plus premultiplied alpha for the active-window cutout, owned popups, taskbar/top-bar clear regions and medium shadow.
+6. Presentation through an IDXGISwapChain1 composition swap chain hosted by DirectComposition.
+
+Release builds remain /MT for the MSVC runtime, but the executable still depends on Windows graphics components including Direct3D 11, DXGI, DirectComposition, Windows Graphics Capture, and the system shader compiler component. Visual Studio Build Tools are required to compile, not to launch the Release EXE.
+
+**Do not assume this version is faster or stable until the Windows CI build and the target-laptop tests pass.** The GTX 1650 supports D3D11, but actual frame pacing, CPU/GPU utilization, overlay hit-testing, transparency, and capture-exclusion behavior are runtime validation items.
