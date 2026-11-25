@@ -1,0 +1,8 @@
+.vs/
+obj/
+artifacts/
+packages/
+*.user
+*.suo
+*.VC.db
+*.VC.VC.opendb
