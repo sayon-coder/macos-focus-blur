@@ -1,4 +1,4 @@
-# FocusGlass v0.1.1 — Windows focus-blur proof of concept
+# FocusGlass v0.1.2 — Windows focus-blur proof of concept
 
 FocusGlass is an early native Windows prototype for the macOS-style focus effect: the foreground application stays sharp while the rest of the primary display is blurred.
 
@@ -21,8 +21,12 @@ FocusGlass is an early native Windows prototype for the macOS-style focus effect
 |---|---|
 | Pause / resume | Ctrl + Alt + B |
 | Exit | Ctrl + Alt + Q |
+| Increase blur strength | Ctrl + Alt + Up |
+| Decrease blur strength | Ctrl + Alt + Down |
 | Tray icon left-click | Pause / resume |
 | Tray icon right-click | Open menu |
+
+Blur strength has 10 levels. Level 4 is the default and preserves the original v0.1.1 blur radius. Each press adjusts one level; the new radius is applied on the next captured frame. A Windows notification reports the current level. Blur settings currently reset to level 4 when FocusGlass is restarted. You can also right-click the tray icon and choose Increase blur or Decrease blur.
 
 Logs are written to `%LOCALAPPDATA%\FocusGlass\FocusGlass.log`.
 
@@ -62,13 +66,13 @@ The user-provided build log confirms a successful v0.1.1 Release x64 build using
 
 Output: `artifacts\x64\Release\FocusGlass.exe`.
 
-This verifies compilation only. Runtime visual correctness, flicker, capture stability, performance, and multi-window behaviour have not yet been verified.
+This verifies compilation only. Runtime visual correctness, flicker, capture stability, performance, and multi-window behaviour have not yet been verified. The v0.1.2 blur-level controls have been added to source but await a fresh Windows build and runtime test.
 
 ## Known limitations
 
 - Primary monitor only. A display-topology change hides the overlay and requires restart.
 - CPU-based blur after Direct3D capture/readback; downsampled and capped at 15 FPS. Performance must be measured on real hardware.
-- No settings UI yet. Blur intensity, brightness, top safe-area height, and frame cap are source constants.
+- No settings window yet. Blur intensity is adjustable with the global shortcuts or tray menu; brightness, top safe-area height, and frame cap remain source constants.
 - Focus transitions are immediate; fades are not implemented.
 - The foreground cutout is rectangular. Rounded corners, multi-monitor support, and per-app exclusions are future work.
 - Protected video, secure desktop/UAC prompts, lock screen, and some elevated or exclusive-fullscreen apps may not capture normally.

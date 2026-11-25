@@ -41,20 +41,26 @@ namespace
     namespace wdx = winrt::Windows::Graphics::DirectX;
     namespace wd3d = winrt::Windows::Graphics::DirectX::Direct3D11;
 
-    constexpr wchar_t kAppClass[] = L"FocusGlass.HiddenHost.v0.1.1";
-    constexpr wchar_t kOverlayClass[] = L"FocusGlass.DesktopOverlay.v0.1.1";
+    constexpr wchar_t kAppClass[] = L"FocusGlass.HiddenHost.v0.1.2";
+    constexpr wchar_t kOverlayClass[] = L"FocusGlass.DesktopOverlay.v0.1.2";
     constexpr UINT kTrayMessage = WM_APP + 10;
     constexpr UINT kNewFrameMessage = WM_APP + 11;
     constexpr UINT kRefreshMaskMessage = WM_APP + 12;
     constexpr UINT kErrorMessage = WM_APP + 13;
     constexpr UINT kHotkeyToggle = 1;
     constexpr UINT kHotkeyExit = 2;
+    constexpr UINT kHotkeyIncreaseBlur = 3;
+    constexpr UINT kHotkeyDecreaseBlur = 4;
     constexpr UINT kMenuToggle = 1001;
     constexpr UINT kMenuExit = 1002;
+    constexpr UINT kMenuIncreaseBlur = 1003;
+    constexpr UINT kMenuDecreaseBlur = 1004;
     constexpr UINT kWdaExcludeFromCapture = 0x00000011;
     constexpr int kTopSafeAreaPx = 30;       // Keeps the user's macOS-style top bar clear.
     constexpr int kMaxBlurWidth = 640;       // Blur is calculated at reduced resolution.
-    constexpr int kBlurBoxRadius = 7;        // Three box passes approximate a soft Gaussian blur.
+    constexpr int kMinBlurLevel = 1;
+    constexpr int kMaxBlurLevel = 10;
+    constexpr int kInitialBlurLevel = 4;     // Preserves the original radius-7 default.
     constexpr double kBackdropBrightness = 0.93;
     constexpr unsigned kMaxProcessedFps = 15;
 
@@ -97,6 +103,12 @@ namespace
     {
         uint8_t b, g, r, a;
     };
+
+    int BlurLevelToRadius(int level) noexcept
+    {
+        // Level 1 is subtle; level 10 is strong. Level 4 preserves the original radius 7.
+        return 1 + (std::clamp(level, kMinBlurLevel, kMaxBlurLevel) - 1) * 2;
+    }
 
     struct MonitorInfo
     {
@@ -185,7 +197,7 @@ namespace
     }
 
     std::vector<Pixel> MakeBlurredPreview(const uint8_t* source, UINT sourcePitch,
-        int sourceWidth, int sourceHeight, int& smallWidth, int& smallHeight)
+        int sourceWidth, int sourceHeight, int blurRadius, int& smallWidth, int& smallHeight)
     {
         const double scale = std::min(1.0, static_cast<double>(kMaxBlurWidth) / sourceWidth);
         smallWidth = std::max(1, static_cast<int>(sourceWidth * scale));
@@ -219,10 +231,12 @@ namespace
         }
 
         // Three horizontal/vertical box passes approximate a Gaussian kernel.
+        // Blur radius is read from the live user setting for every captured frame.
+        const int radius = std::clamp(blurRadius, 1, 19);
         for (int pass = 0; pass < 3; ++pass)
         {
-            BoxBlurHorizontal(blurPixels, smallWidth, smallHeight, kBlurBoxRadius);
-            BoxBlurVertical(blurPixels, smallWidth, smallHeight, kBlurBoxRadius);
+            BoxBlurHorizontal(blurPixels, smallWidth, smallHeight, radius);
+            BoxBlurVertical(blurPixels, smallWidth, smallHeight, radius);
         }
         return blurPixels;
     }
@@ -230,7 +244,8 @@ namespace
     class CaptureEngine : public std::enable_shared_from_this<CaptureEngine>
     {
     public:
-        explicit CaptureEngine(HWND notifyWindow) : m_notifyWindow(notifyWindow) { }
+        explicit CaptureEngine(HWND notifyWindow, std::shared_ptr<std::atomic<int>> blurLevel)
+            : m_notifyWindow(notifyWindow), m_blurLevel(std::move(blurLevel)) { }
 
         void Start(const MonitorInfo& monitor)
         {
@@ -355,8 +370,9 @@ namespace
                 D3D11_MAPPED_SUBRESOURCE mapped{};
                 winrt::check_hresult(m_d3dContext->Map(m_staging.get(), 0, D3D11_MAP_READ, 0, &mapped));
                 int smallWidth = 0, smallHeight = 0;
+                const int blurRadius = BlurLevelToRadius(m_blurLevel->load(std::memory_order_relaxed));
                 auto preview = MakeBlurredPreview(static_cast<const uint8_t*>(mapped.pData),
-                    mapped.RowPitch, m_stagingWidth, m_stagingHeight, smallWidth, smallHeight);
+                    mapped.RowPitch, m_stagingWidth, m_stagingHeight, blurRadius, smallWidth, smallHeight);
                 m_d3dContext->Unmap(m_staging.get(), 0);
 
                 {
@@ -385,6 +401,7 @@ namespace
         }
 
         HWND m_notifyWindow{};
+        std::shared_ptr<std::atomic<int>> m_blurLevel;
         MonitorInfo m_monitor{};
         std::atomic<bool> m_stopping{ false };
         std::chrono::steady_clock::time_point m_lastProcessed{};
@@ -517,22 +534,26 @@ namespace
             if (!SetWindowDisplayAffinity(m_overlay, kWdaExcludeFromCapture))
                 throw std::runtime_error("Windows could not exclude the overlay from screen capture. The effect was not started.");
 
-            if (!RegisterHotKey(m_host, kHotkeyToggle, MOD_CONTROL | MOD_ALT, 'B'))
+            if (!RegisterHotKey(m_host, kHotkeyToggle, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'B'))
                 Log(L"Could not register Ctrl+Alt+B hotkey.");
-            if (!RegisterHotKey(m_host, kHotkeyExit, MOD_CONTROL | MOD_ALT, 'Q'))
+            if (!RegisterHotKey(m_host, kHotkeyExit, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'Q'))
                 Log(L"Could not register Ctrl+Alt+Q hotkey.");
+            if (!RegisterHotKey(m_host, kHotkeyIncreaseBlur, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_UP))
+                Log(L"Could not register Ctrl+Alt+Up blur-increase hotkey.");
+            if (!RegisterHotKey(m_host, kHotkeyDecreaseBlur, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_DOWN))
+                Log(L"Could not register Ctrl+Alt+Down blur-decrease hotkey.");
 
             m_foregroundHook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
                 nullptr, WinEventProc, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
             m_locationHook = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE,
                 nullptr, WinEventProc, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 
-            m_capture = std::make_shared<CaptureEngine>(m_host);
+            m_capture = std::make_shared<CaptureEngine>(m_host, m_blurLevel);
             m_capture->Start(m_monitor);
             AddTrayIcon();
             m_enabled = true;
             ShowOverlay();
-            Log(L"FocusGlass v0.1.1 started. Ctrl+Alt+B toggles; Ctrl+Alt+Q exits.");
+            Log(L"FocusGlass v0.1.2 started. Blur level defaults to 4/10; Ctrl+Alt+Up/Down adjusts it. Ctrl+Alt+B toggles; Ctrl+Alt+Q exits.");
 
             MSG message{};
             while (GetMessageW(&message, nullptr, 0, 0) > 0)
@@ -570,10 +591,14 @@ namespace
             case WM_HOTKEY:
                 if (wParam == kHotkeyToggle) self->Toggle();
                 else if (wParam == kHotkeyExit) { self->m_exitRequested = true; DestroyWindow(hwnd); }
+                else if (wParam == kHotkeyIncreaseBlur) self->AdjustBlur(+1);
+                else if (wParam == kHotkeyDecreaseBlur) self->AdjustBlur(-1);
                 return 0;
             case WM_COMMAND:
                 if (LOWORD(wParam) == kMenuToggle) self->Toggle();
                 else if (LOWORD(wParam) == kMenuExit) { self->m_exitRequested = true; DestroyWindow(hwnd); }
+                else if (LOWORD(wParam) == kMenuIncreaseBlur) self->AdjustBlur(+1);
+                else if (LOWORD(wParam) == kMenuDecreaseBlur) self->AdjustBlur(-1);
                 return 0;
             case kTrayMessage:
                 if (lParam == WM_RBUTTONUP || lParam == WM_CONTEXTMENU) self->ShowTrayMenu();
@@ -684,6 +709,12 @@ namespace
             GetCursorPos(&point);
             HMENU menu = CreatePopupMenu();
             if (!menu) return;
+            const int level = m_blurLevel->load(std::memory_order_relaxed);
+            const UINT increaseFlags = MF_STRING | (level >= kMaxBlurLevel ? MF_GRAYED : 0);
+            const UINT decreaseFlags = MF_STRING | (level <= kMinBlurLevel ? MF_GRAYED : 0);
+            AppendMenuW(menu, increaseFlags, kMenuIncreaseBlur, L"Increase blur  (Ctrl+Alt+Up)");
+            AppendMenuW(menu, decreaseFlags, kMenuDecreaseBlur, L"Decrease blur  (Ctrl+Alt+Down)");
+            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(menu, MF_STRING, kMenuToggle, m_enabled ? L"Pause focus blur" : L"Resume focus blur");
             AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(menu, MF_STRING, kMenuExit, L"Exit FocusGlass");
@@ -692,6 +723,40 @@ namespace
             TrackPopupMenu(menu, TPM_RIGHTBUTTON | TPM_BOTTOMALIGN, point.x, point.y, 0, m_host, nullptr);
             DestroyMenu(menu);
             if (m_enabled && !m_exitRequested) ShowOverlay();
+        }
+
+        void AdjustBlur(int delta)
+        {
+            const int current = m_blurLevel->load(std::memory_order_relaxed);
+            const int next = std::clamp(current + delta, kMinBlurLevel, kMaxBlurLevel);
+            if (next == current)
+            {
+                ShowBlurNotification(current >= kMaxBlurLevel
+                    ? L"Maximum blur strength reached."
+                    : L"Minimum blur strength reached.");
+                return;
+            }
+
+            m_blurLevel->store(next, std::memory_order_relaxed);
+            const std::wstring status = L"FocusGlass - " + std::to_wstring(next) +
+                L"/10 blur (Ctrl+Alt+Up/Down)";
+            UpdateTrayTip(status.c_str());
+
+            const std::wstring message = L"Blur strength: " + std::to_wstring(next) + L"/10";
+            ShowBlurNotification(message.c_str());
+            Log(L"Blur strength changed to " + std::to_wstring(next) + L"/10.");
+        }
+
+        void ShowBlurNotification(const wchar_t* message)
+        {
+            if (!m_tray.hWnd) return;
+            NOTIFYICONDATAW notification = m_tray;
+            notification.uFlags = NIF_INFO;
+            wcscpy_s(notification.szInfoTitle, L"FocusGlass");
+            wcsncpy_s(notification.szInfo, message, _TRUNCATE);
+            notification.dwInfoFlags = NIIF_INFO;
+            notification.uTimeout = 1500;
+            Shell_NotifyIconW(NIM_MODIFY, &notification);
         }
 
         void Toggle()
@@ -708,7 +773,7 @@ namespace
 
             try
             {
-                m_capture = std::make_shared<CaptureEngine>(m_host);
+                m_capture = std::make_shared<CaptureEngine>(m_host, m_blurLevel);
                 m_capture->Start(m_monitor);
                 m_enabled = true;
                 ShowOverlay();
@@ -841,6 +906,8 @@ namespace
             if (m_locationHook) UnhookWinEvent(m_locationHook);
             UnregisterHotKey(m_host, kHotkeyToggle);
             UnregisterHotKey(m_host, kHotkeyExit);
+            UnregisterHotKey(m_host, kHotkeyIncreaseBlur);
+            UnregisterHotKey(m_host, kHotkeyDecreaseBlur);
             if (m_tray.hWnd) Shell_NotifyIconW(NIM_DELETE, &m_tray);
             if (m_memoryDc && m_oldBitmap) SelectObject(m_memoryDc, m_oldBitmap);
             if (m_bitmap) DeleteObject(m_bitmap);
@@ -866,6 +933,8 @@ namespace
         bool m_enabled{ false };
         bool m_shutdown{ false };
         bool m_exitRequested{ false };
+        std::shared_ptr<std::atomic<int>> m_blurLevel{
+            std::make_shared<std::atomic<int>>(kInitialBlurLevel) };
         std::shared_ptr<CaptureEngine> m_capture;
     };
 }
