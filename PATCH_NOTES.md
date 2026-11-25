@@ -25,3 +25,13 @@ The user's Windows build log confirms that this v0.1.1 source compiled successfu
 - The selected level currently resets to 4 when the app restarts; persistent settings and a graphical settings window remain future work.
 
 The v0.1.2 source changes have not yet been compiled on Windows. The user must rebuild and test before treating the shortcuts as verified.
+
+
+# FocusGlass v0.1.3 — Runtime diagnostics and single-instance guard
+
+- Added a named Windows mutex to prevent multiple FocusGlass instances from creating competing capture sessions and overlay windows.
+- A second launch now displays an explicit “already running” message and exits without starting another capture session.
+- Hotkey registration errors now log the Win32 error code to help distinguish conflicts from other registration failures.
+- Preserved the v0.1.2 blur strength controls and defaults.
+
+The v0.1.3 change has not yet been compiled on Windows or runtime-tested.

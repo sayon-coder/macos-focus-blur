@@ -1,4 +1,4 @@
-# FocusGlass v0.1.2 — Windows focus-blur proof of concept
+# FocusGlass v0.1.3 — Windows focus-blur proof of concept
 
 FocusGlass is an early native Windows prototype for the macOS-style focus effect: the foreground application stays sharp while the rest of the primary display is blurred.
 
@@ -66,7 +66,7 @@ The user-provided build log confirms a successful v0.1.1 Release x64 build using
 
 Output: `artifacts\x64\Release\FocusGlass.exe`.
 
-This verifies compilation only. Runtime visual correctness, flicker, capture stability, performance, and multi-window behaviour have not yet been verified. The v0.1.2 blur-level controls have been added to source but await a fresh Windows build and runtime test.
+This verifies compilation only. Runtime visual correctness, flicker, capture stability, performance, and multi-window behaviour have not yet been verified. The v0.1.2 blur-level controls and v0.1.3 single-instance guard have been added to source but await fresh Windows builds and runtime testing.
 
 ## Known limitations
 

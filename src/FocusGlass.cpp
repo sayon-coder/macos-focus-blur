@@ -66,6 +66,7 @@ namespace
 
     HWND g_hostWindow = nullptr;
     HWND g_overlayWindow = nullptr;
+    constexpr wchar_t kSingleInstanceMutexName[] = L"Local\\FocusGlass.SingleInstance.v1";
 
     std::filesystem::path LogPath()
     {
@@ -97,6 +98,18 @@ namespace
             }
         }
         catch (...) { }
+    }
+
+    bool RegisterAppHotKey(HWND window, UINT id, UINT modifiers, UINT virtualKey,
+        const wchar_t* description)
+    {
+        if (RegisterHotKey(window, id, modifiers, virtualKey))
+            return true;
+
+        const DWORD error = GetLastError();
+        Log(std::wstring(L"Could not register ") + description +
+            L" (Win32 error " + std::to_wstring(error) + L").");
+        return false;
     }
 
     struct Pixel
@@ -534,14 +547,14 @@ namespace
             if (!SetWindowDisplayAffinity(m_overlay, kWdaExcludeFromCapture))
                 throw std::runtime_error("Windows could not exclude the overlay from screen capture. The effect was not started.");
 
-            if (!RegisterHotKey(m_host, kHotkeyToggle, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'B'))
-                Log(L"Could not register Ctrl+Alt+B hotkey.");
-            if (!RegisterHotKey(m_host, kHotkeyExit, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'Q'))
-                Log(L"Could not register Ctrl+Alt+Q hotkey.");
-            if (!RegisterHotKey(m_host, kHotkeyIncreaseBlur, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_UP))
-                Log(L"Could not register Ctrl+Alt+Up blur-increase hotkey.");
-            if (!RegisterHotKey(m_host, kHotkeyDecreaseBlur, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_DOWN))
-                Log(L"Could not register Ctrl+Alt+Down blur-decrease hotkey.");
+            RegisterAppHotKey(m_host, kHotkeyToggle, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'B',
+                L"Ctrl+Alt+B pause/resume hotkey");
+            RegisterAppHotKey(m_host, kHotkeyExit, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'Q',
+                L"Ctrl+Alt+Q exit hotkey");
+            RegisterAppHotKey(m_host, kHotkeyIncreaseBlur, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_UP,
+                L"Ctrl+Alt+Up blur-increase hotkey");
+            RegisterAppHotKey(m_host, kHotkeyDecreaseBlur, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_DOWN,
+                L"Ctrl+Alt+Down blur-decrease hotkey");
 
             m_foregroundHook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
                 nullptr, WinEventProc, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
@@ -941,6 +954,31 @@ namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
 {
+    // Multiple copies create competing capture sessions and layered overlays.
+    // Enforce a single process-wide instance before creating windows or hotkeys.
+    SetLastError(ERROR_SUCCESS);
+    HANDLE singletonMutex = CreateMutexW(nullptr, FALSE, kSingleInstanceMutexName);
+    if (!singletonMutex)
+    {
+        const DWORD error = GetLastError();
+        const std::wstring message = L"Could not create the FocusGlass single-instance guard. Win32 error " +
+            std::to_wstring(error) + L".";
+        MessageBoxW(nullptr, message.c_str(), L"FocusGlass startup error", MB_ICONERROR | MB_OK);
+        return 1;
+    }
+
+    if (GetLastError() == ERROR_ALREADY_EXISTS)
+    {
+        CloseHandle(singletonMutex);
+        MessageBoxW(nullptr,
+            L"FocusGlass is already running. Use the existing instance. If it is unresponsive, close all FocusGlass.exe processes in Task Manager and launch it again.",
+            L"FocusGlass is already running", MB_ICONINFORMATION | MB_OK);
+        return 0;
+    }
+
+    const auto closeMutex = [](HANDLE handle) { if (handle) CloseHandle(handle); };
+    std::unique_ptr<void, decltype(closeMutex)> singletonGuard(singletonMutex, closeMutex);
+
     try
     {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
