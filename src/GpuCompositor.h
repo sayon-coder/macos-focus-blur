@@ -254,11 +254,11 @@ cbuffer CompositeParams : register(b0)
     float4 clearRects[32];
 };
 
-float RoundedRectDistance(float2 point, float4 rect, float radius)
+float RoundedRectDistance(float2 samplePosition, float4 boundsRect, float radius)
 {
-    float2 center = (rect.xy + rect.zw) * 0.5;
-    float2 halfSize = max((rect.zw - rect.xy) * 0.5, float2(0.0, 0.0));
-    float2 q = abs(point - center) - (halfSize - radius);
+    float2 center = (boundsRect.xy + boundsRect.zw) * 0.5;
+    float2 halfSize = max((boundsRect.zw - boundsRect.xy) * 0.5, float2(0.0, 0.0));
+    float2 q = abs(samplePosition - center) - (halfSize - radius);
     return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
 }
 
