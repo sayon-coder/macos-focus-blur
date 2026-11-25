@@ -414,10 +414,9 @@ float4 PSComposite(VertexOutput input) : SV_TARGET
             FOCUSGLASS_CHECK_HRESULT(m_swapChain->QueryInterface(__uuidof(IDXGISwapChain3),
                 m_swapChain3.put_void()));
 
-            winrt::com_ptr<IDXGISwapChain2> swapChain2;
-            if (SUCCEEDED(m_swapChain->QueryInterface(__uuidof(IDXGISwapChain2), swapChain2.put_void())))
-                FOCUSGLASS_CHECK_HRESULT(swapChain2->SetMaximumFrameLatency(1));
-
+            // Keep the default DXGI frame queue. SetMaximumFrameLatency requires
+            // DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT, which this composition
+            // swap chain intentionally does not enable.
             winrt::com_ptr<ID3D11Texture2D> backBuffer;
             FOCUSGLASS_CHECK_HRESULT(m_swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), backBuffer.put_void()));
             FOCUSGLASS_CHECK_HRESULT(m_device->CreateRenderTargetView(backBuffer.get(), nullptr, m_swapChainTarget.put()));
