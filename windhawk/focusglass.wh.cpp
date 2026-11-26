@@ -75,7 +75,6 @@ as a replacement for the standalone FocusGlass application.
 #include <d3d11.h>
 #include <dxgi1_2.h>
 #include <windows.graphics.capture.interop.h>
-#include <windows.graphics.directx.direct3d11.interop.h>
 
 #include <windows.h>
 #include <d3d11.h>
@@ -83,6 +82,7 @@ as a replacement for the standalone FocusGlass application.
 #include <dxgi1_2.h>
 #include <dxgi1_3.h>
 #include <dcomp.h>
+#include <inspectable.h>
 #include <winrt/base.h>
 
 #include <algorithm>
@@ -690,6 +690,22 @@ namespace
     namespace wdx = winrt::Windows::Graphics::DirectX;
     namespace wd3d = winrt::Windows::Graphics::DirectX::Direct3D11;
 
+    // The Windhawk LLVM/MinGW SDK doesn't ship
+    // windows.graphics.directx.direct3d11.interop.h. Keep the small COM ABI
+    // declaration local, as used by the official Windhawk Alt-Tab Flip 3D mod.
+    struct IDirect3DDxgiInterfaceAccess : public IUnknown
+    {
+        virtual HRESULT STDMETHODCALLTYPE GetInterface(REFIID iid, void** value) = 0;
+    };
+
+    constexpr GUID kIID_IDirect3DDxgiInterfaceAccess = {
+        0xa9b3d012, 0x3df2, 0x4ee3,
+        { 0xb8, 0xd1, 0x86, 0x95, 0xf4, 0x57, 0xd3, 0xc1 }
+    };
+
+    using CreateDirect3D11DeviceFromDXGIDevice_t =
+        HRESULT(WINAPI*)(IDXGIDevice*, ::IInspectable**);
+
     constexpr wchar_t kAppClass[] = L"FocusGlass.HiddenHost";
     constexpr wchar_t kOverlayClass[] = L"FocusGlass.DesktopOverlay";
     constexpr UINT kTrayMessage = WM_APP + 10;
@@ -814,8 +830,21 @@ namespace
 
             winrt::com_ptr<IDXGIDevice> dxgiDevice;
             winrt::check_hresult(m_d3dDevice->QueryInterface(__uuidof(IDXGIDevice), dxgiDevice.put_void()));
-            winrt::check_hresult(::CreateDirect3D11DeviceFromDXGIDevice(
-                dxgiDevice.get(), reinterpret_cast<::IInspectable**>(winrt::put_abi(m_winrtDevice))));
+
+            // Resolve the WinRT bridge dynamically instead of relying on the
+            // omitted windows.graphics.directx.direct3d11.interop.h declaration.
+            const HMODULE d3d11Module = GetModuleHandleW(L"d3d11.dll");
+            const auto createCaptureDevice = d3d11Module
+                ? reinterpret_cast<CreateDirect3D11DeviceFromDXGIDevice_t>(
+                    GetProcAddress(d3d11Module, "CreateDirect3D11DeviceFromDXGIDevice"))
+                : nullptr;
+            if (!createCaptureDevice)
+                throw std::runtime_error("CreateDirect3D11DeviceFromDXGIDevice is unavailable.");
+
+            winrt::com_ptr<::IInspectable> inspectableDevice;
+            winrt::check_hresult(createCaptureDevice(dxgiDevice.get(), inspectableDevice.put()));
+            winrt::check_hresult(inspectableDevice->QueryInterface(
+                winrt::guid_of<wd3d::IDirect3DDevice>(), winrt::put_abi(m_winrtDevice)));
 
             auto interop = winrt::get_activation_factory<wgc::GraphicsCaptureItem, ::IGraphicsCaptureItemInterop>();
             winrt::check_hresult(interop->CreateForMonitor(monitor.handle,
@@ -897,7 +926,9 @@ namespace
                 snapshot->frame = capturedFrame;
 
                 auto surface = capturedFrame.Surface();
-                auto access = surface.as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
+                winrt::com_ptr<IDirect3DDxgiInterfaceAccess> access;
+                winrt::check_hresult(winrt::get_unknown(surface)->QueryInterface(
+                    kIID_IDirect3DDxgiInterfaceAccess, access.put_void()));
                 winrt::check_hresult(access->GetInterface(
                     __uuidof(ID3D11Texture2D), snapshot->texture.put_void()));
 
