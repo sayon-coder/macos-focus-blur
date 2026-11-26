@@ -1629,6 +1629,7 @@ namespace
 {
     DWORD WINAPI FocusGlassWorkerThread(LPVOID)
     {
+        FocusGlassDebugTrace(L"Dedicated worker thread entered.");
         bool apartmentInitialized = false;
         try
         {
@@ -1638,24 +1639,30 @@ namespace
             SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
             winrt::init_apartment(winrt::apartment_type::multi_threaded);
             apartmentInitialized = true;
+            FocusGlassDebugTrace(L"WinRT MTA apartment initialized.");
 
             App app;
+            FocusGlassDebugTrace(L"Starting desktop capture and GPU compositor.");
             app.Run(GetModuleHandleW(nullptr), g_appReadyEvent);
+            FocusGlassDebugTrace(L"App.Run returned.");
         }
         catch (const winrt::hresult_error& error)
         {
+            FocusGlassDebugTrace(std::wstring(L"Startup HRESULT exception: ") + error.message().c_str());
             Log(std::wstring(L"FocusGlass startup failed: ") + error.message().c_str());
             if (g_appReadyEvent)
                 SetEvent(g_appReadyEvent);
         }
         catch (const std::exception& error)
         {
+            FocusGlassDebugTrace(std::wstring(L"Startup exception: ") + winrt::to_hstring(error.what()).c_str());
             Log(std::wstring(L"FocusGlass startup failed: ") + winrt::to_hstring(error.what()).c_str());
             if (g_appReadyEvent)
                 SetEvent(g_appReadyEvent);
         }
         catch (...)
         {
+            FocusGlassDebugTrace(L"Startup failed with an unknown exception.");
             Log(L"FocusGlass startup failed with an unknown error.");
             if (g_appReadyEvent)
                 SetEvent(g_appReadyEvent);
@@ -1684,6 +1691,7 @@ namespace
 
 BOOL WhTool_ModInit()
 {
+    FocusGlassDebugTrace(L"WhTool_ModInit entered in dedicated process.");
     LoadWindhawkSettings();
     g_appStartSucceeded.store(false, std::memory_order_release);
     g_appReadyEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -1696,15 +1704,21 @@ BOOL WhTool_ModInit()
     g_appThread = CreateThread(nullptr, 0, FocusGlassWorkerThread, nullptr, 0, &g_appThreadId);
     if (!g_appThread)
     {
+        FocusGlassDebugTrace(L"CreateThread for renderer failed.");
         Wh_Log(L"FocusGlass: CreateThread failed with error %lu", GetLastError());
         CloseWorkerHandles();
         return FALSE;
     }
 
+    FocusGlassDebugTrace(L"Waiting up to 20 seconds for renderer initialization.");
     const DWORD waitResult = WaitForSingleObject(g_appReadyEvent, 20000);
+    FocusGlassDebugTrace(L"Renderer startup wait finished: waitResult=" +
+        std::to_wstring(waitResult) + L", success=" +
+        std::to_wstring(g_appStartSucceeded.load(std::memory_order_acquire) ? 1 : 0) + L".");
     if (waitResult != WAIT_OBJECT_0 ||
         !g_appStartSucceeded.load(std::memory_order_acquire))
     {
+        FocusGlassDebugTrace(L"Renderer startup did not complete successfully; stopping worker.");
         Wh_Log(L"FocusGlass: the renderer did not report a successful startup.");
         const HWND hostWindow = g_hostWindow.load(std::memory_order_acquire);
         if (hostWindow)
@@ -1717,6 +1731,7 @@ BOOL WhTool_ModInit()
         return FALSE;
     }
 
+    FocusGlassDebugTrace(L"WhTool_ModInit completed successfully; renderer is ready.");
     return TRUE;
 }
 
@@ -1761,6 +1776,15 @@ void WhTool_ModUninit()
 bool g_isToolModProcessLauncher = false;
 HANDLE g_toolModProcessMutex = nullptr;
 
+void FocusGlassDebugTrace(const std::wstring& message)
+{
+    const std::wstring line = L"[FocusGlass pid=" +
+        std::to_wstring(GetCurrentProcessId()) + L"] " + message;
+    Wh_Log(L"%s", line.c_str());
+    OutputDebugStringW(line.c_str());
+    OutputDebugStringW(L"\\r\\n");
+}
+
 void WINAPI EntryPoint_Hook()
 {
     Wh_Log(L"FocusGlass Tool Mod worker entry point");
@@ -1769,6 +1793,7 @@ void WINAPI EntryPoint_Hook()
 
 BOOL Wh_ModInit()
 {
+    FocusGlassDebugTrace(L"Wh_ModInit entered. Command line: " + std::wstring(GetCommandLineW()));
     DWORD sessionId = 0;
     if (ProcessIdToSessionId(GetCurrentProcessId(), &sessionId) && sessionId == 0)
         return FALSE;
@@ -1806,6 +1831,10 @@ BOOL Wh_ModInit()
     }
 
     LocalFree(argv);
+    FocusGlassDebugTrace(L"Process classification: excluded=" +
+        std::to_wstring(isExcluded ? 1 : 0) + L", toolMod=" +
+        std::to_wstring(isToolModProcess ? 1 : 0) + L", focusglassWorker=" +
+        std::to_wstring(isCurrentToolModProcess ? 1 : 0) + L".");
     if (isExcluded)
         return FALSE;
 
@@ -1838,13 +1867,18 @@ BOOL Wh_ModInit()
         return FALSE;
 
     g_isToolModProcessLauncher = true;
+    FocusGlassDebugTrace(L"Launcher instance initialized; waiting for Wh_ModAfterInit.");
     return TRUE;
 }
 
 void Wh_ModAfterInit()
 {
     if (!g_isToolModProcessLauncher)
+    {
+        FocusGlassDebugTrace(L"Wh_ModAfterInit called in worker/non-launcher process; no spawn required.");
         return;
+    }
+    FocusGlassDebugTrace(L"Wh_ModAfterInit entered; attempting to launch dedicated worker.");
 
     WCHAR currentProcessPath[MAX_PATH]{};
     const DWORD pathLength = GetModuleFileNameW(nullptr, currentProcessPath, ARRAYSIZE(currentProcessPath));
@@ -1878,6 +1912,7 @@ void Wh_ModAfterInit()
         GetProcAddress(kernelModule, "CreateProcessInternalW"));
     if (!createProcessInternal)
     {
+        FocusGlassDebugTrace(L"CreateProcessInternalW export was not found.");
         Wh_Log(L"FocusGlass: CreateProcessInternalW was not found.");
         return;
     }
@@ -1889,10 +1924,15 @@ void Wh_ModAfterInit()
     if (!createProcessInternal(nullptr, currentProcessPath, commandLine, nullptr, nullptr,
         FALSE, NORMAL_PRIORITY_CLASS, nullptr, nullptr, &startupInfo, &processInfo, nullptr))
     {
-        Wh_Log(L"FocusGlass: failed to launch dedicated Tool Mod process (error %lu).", GetLastError());
+        const DWORD error = GetLastError();
+        FocusGlassDebugTrace(L"CreateProcessInternalW failed with Win32 error " +
+            std::to_wstring(error) + L".");
+        Wh_Log(L"FocusGlass: failed to launch dedicated Tool Mod process (error %lu).", error);
         return;
     }
 
+    FocusGlassDebugTrace(L"Dedicated worker process created. PID=" +
+        std::to_wstring(processInfo.dwProcessId) + L". Command line: " + commandLine);
     CloseHandle(processInfo.hProcess);
     CloseHandle(processInfo.hThread);
 }
