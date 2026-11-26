@@ -522,7 +522,7 @@ namespace
 
     std::filesystem::path GetCurrentExecutablePath()
     {
-        std::wstring buffer(32768, L'\\0');
+        std::wstring buffer(32768, L'\0');
         const DWORD length = GetModuleFileNameW(
             nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
         if (length == 0 || length >= buffer.size())
