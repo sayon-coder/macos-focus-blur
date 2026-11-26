@@ -1189,8 +1189,7 @@ namespace
                 SetEvent(readyEvent);
 
             MSG message{};
-            const BOOL getMessageResult = TRUE;
-            BOOL result = getMessageResult;
+            BOOL result = 0;
             while ((result = GetMessageW(&message, nullptr, 0, 0)) > 0)
             {
                 TranslateMessage(&message);
