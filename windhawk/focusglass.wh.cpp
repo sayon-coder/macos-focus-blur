@@ -75,6 +75,7 @@ as a replacement for the standalone FocusGlass application.
 #include <d3dcompiler.h>
 #include <dxgi1_2.h>
 #include <dxgi1_3.h>
+#include <dxgi1_6.h>
 #include <dcomp.h>
 #include <inspectable.h>
 #include <windows.graphics.capture.interop.h>
