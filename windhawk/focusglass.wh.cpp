@@ -1697,6 +1697,7 @@ BOOL WhTool_ModInit()
     g_appReadyEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (!g_appReadyEvent)
     {
+        FocusGlassDebugTrace(L"CreateEvent failed with Win32 error " + std::to_wstring(GetLastError()) + L".");
         Wh_Log(L"FocusGlass: CreateEvent failed with error %lu", GetLastError());
         return FALSE;
     }
@@ -1782,7 +1783,7 @@ void FocusGlassDebugTrace(const std::wstring& message)
         std::to_wstring(GetCurrentProcessId()) + L"] " + message;
     Wh_Log(L"%s", line.c_str());
     OutputDebugStringW(line.c_str());
-    OutputDebugStringW(L"\\r\\n");
+    OutputDebugStringW(L"\r\n");
 }
 
 void WINAPI EntryPoint_Hook()
@@ -1796,7 +1797,10 @@ BOOL Wh_ModInit()
     FocusGlassDebugTrace(L"Wh_ModInit entered. Command line: " + std::wstring(GetCommandLineW()));
     DWORD sessionId = 0;
     if (ProcessIdToSessionId(GetCurrentProcessId(), &sessionId) && sessionId == 0)
+    {
+        FocusGlassDebugTrace(L"Skipping Session 0 process.");
         return FALSE;
+    }
 
     bool isExcluded = false;
     bool isToolModProcess = false;
@@ -1805,6 +1809,7 @@ BOOL Wh_ModInit()
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (!argv)
     {
+        FocusGlassDebugTrace(L"CommandLineToArgvW failed.");
         Wh_Log(L"FocusGlass: CommandLineToArgvW failed.");
         return FALSE;
     }
@@ -1836,23 +1841,31 @@ BOOL Wh_ModInit()
         std::to_wstring(isToolModProcess ? 1 : 0) + L", focusglassWorker=" +
         std::to_wstring(isCurrentToolModProcess ? 1 : 0) + L".");
     if (isExcluded)
+    {
+        FocusGlassDebugTrace(L"Skipping Windhawk service process.");
         return FALSE;
+    }
 
     if (isCurrentToolModProcess)
     {
         g_toolModProcessMutex = CreateMutexW(nullptr, TRUE, L"windhawk-tool-mod_" WH_MOD_ID);
         if (!g_toolModProcessMutex)
         {
+            FocusGlassDebugTrace(L"Worker failed to create its single-instance mutex.");
             Wh_Log(L"FocusGlass: CreateMutex failed.");
             ExitProcess(1);
         }
         if (GetLastError() == ERROR_ALREADY_EXISTS)
         {
+            FocusGlassDebugTrace(L"A FocusGlass Tool Mod worker already exists.");
             Wh_Log(L"FocusGlass Tool Mod process is already running.");
             ExitProcess(1);
         }
         if (!WhTool_ModInit())
+        {
+            FocusGlassDebugTrace(L"WhTool_ModInit returned FALSE; worker is exiting.");
             ExitProcess(1);
+        }
 
         auto* dosHeader = reinterpret_cast<IMAGE_DOS_HEADER*>(GetModuleHandleW(nullptr));
         auto* ntHeaders = reinterpret_cast<IMAGE_NT_HEADERS*>(
@@ -1884,6 +1897,7 @@ void Wh_ModAfterInit()
     const DWORD pathLength = GetModuleFileNameW(nullptr, currentProcessPath, ARRAYSIZE(currentProcessPath));
     if (pathLength == 0 || pathLength >= ARRAYSIZE(currentProcessPath))
     {
+        FocusGlassDebugTrace(L"GetModuleFileName failed in launcher.");
         Wh_Log(L"FocusGlass: GetModuleFileName failed.");
         return;
     }
@@ -1892,6 +1906,7 @@ void Wh_ModAfterInit()
     if (swprintf_s(commandLine, ARRAYSIZE(commandLine), L"\"%s\" -tool-mod \"%s\"",
         currentProcessPath, WH_MOD_ID) < 0)
     {
+        FocusGlassDebugTrace(L"Failed to format the dedicated worker command line.");
         Wh_Log(L"FocusGlass: failed to format the Tool Mod command line.");
         return;
     }
@@ -1901,6 +1916,7 @@ void Wh_ModAfterInit()
         kernelModule = GetModuleHandleW(L"kernel32.dll");
     if (!kernelModule)
     {
+        FocusGlassDebugTrace(L"Could not find kernelbase.dll or kernel32.dll.");
         Wh_Log(L"FocusGlass: kernelbase/kernel32 module was not found.");
         return;
     }
