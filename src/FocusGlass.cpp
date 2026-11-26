@@ -1,6 +1,8 @@
 #include <windows.h>
 #include <windowsx.h>
 #include <shellapi.h>
+#include <shlobj.h>
+#include <shobjidl.h>
 #include <dwmapi.h>
 #include <d3d11.h>
 #include <dxgi1_2.h>
@@ -36,6 +38,8 @@
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "windowsapp.lib")
 #pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "uuid.lib")
 
 namespace
 {
@@ -57,6 +61,7 @@ namespace
     constexpr UINT kMenuExit = 1002;
     constexpr UINT kMenuIncreaseBlur = 1003;
     constexpr UINT kMenuDecreaseBlur = 1004;
+    constexpr UINT kMenuStartup = 1005;
     constexpr UINT kWdaExcludeFromCapture = 0x00000011;
     constexpr int kTopSafeAreaPx = 30;       // Keeps the user's macOS-style top bar clear.
     constexpr int kMinBlurLevel = 1;
@@ -504,6 +509,82 @@ namespace
         return layout;
     }
 
+    std::filesystem::path GetStartupShortcutPath()
+    {
+        PWSTR startupFolder = nullptr;
+        winrt::check_hresult(SHGetKnownFolderPath(
+            FOLDERID_Startup, KF_FLAG_CREATE, nullptr, &startupFolder));
+
+        std::filesystem::path folder(startupFolder);
+        CoTaskMemFree(startupFolder);
+        return folder / L"FocusGlass.lnk";
+    }
+
+    std::filesystem::path GetCurrentExecutablePath()
+    {
+        std::wstring buffer(32768, L'\\0');
+        const DWORD length = GetModuleFileNameW(
+            nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (length == 0 || length >= buffer.size())
+            throw std::runtime_error("Could not determine the FocusGlass executable path.");
+
+        buffer.resize(length);
+        return std::filesystem::path(buffer);
+    }
+
+    bool IsStartupShortcutEnabled() noexcept
+    {
+        try
+        {
+            const auto path = GetStartupShortcutPath();
+            const DWORD attributes = GetFileAttributesW(path.c_str());
+            return attributes != INVALID_FILE_ATTRIBUTES &&
+                (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    void SetStartupShortcutEnabled(bool enabled)
+    {
+        const auto shortcutPath = GetStartupShortcutPath();
+        if (!enabled)
+        {
+            if (!DeleteFileW(shortcutPath.c_str()) && GetLastError() != ERROR_FILE_NOT_FOUND)
+                throw std::runtime_error("Could not remove the FocusGlass Startup shortcut (Windows error " +
+                    std::to_string(GetLastError()) + ").");
+            return;
+        }
+
+        const auto executablePath = GetCurrentExecutablePath();
+        const auto temporaryPath = std::filesystem::path(shortcutPath.wstring() + L".tmp");
+        DeleteFileW(temporaryPath.c_str());
+
+        winrt::com_ptr<IShellLinkW> shellLink;
+        winrt::check_hresult(CoCreateInstance(
+            CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER,
+            __uuidof(IShellLinkW), shellLink.put_void()));
+        winrt::check_hresult(shellLink->SetPath(executablePath.c_str()));
+        winrt::check_hresult(shellLink->SetWorkingDirectory(executablePath.parent_path().c_str()));
+        winrt::check_hresult(shellLink->SetDescription(L"Start FocusGlass when you sign in to Windows"));
+
+        winrt::com_ptr<IPersistFile> persistFile;
+        winrt::check_hresult(shellLink->QueryInterface(
+            __uuidof(IPersistFile), persistFile.put_void()));
+        winrt::check_hresult(persistFile->Save(temporaryPath.c_str(), TRUE));
+
+        if (!MoveFileExW(temporaryPath.c_str(), shortcutPath.c_str(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        {
+            const DWORD error = GetLastError();
+            DeleteFileW(temporaryPath.c_str());
+            throw std::runtime_error("Could not install the FocusGlass Startup shortcut (Windows error " +
+                std::to_string(error) + ").");
+        }
+    }
+
     class App
     {
     public:
@@ -608,6 +689,7 @@ namespace
                 else if (LOWORD(wParam) == kMenuExit) { self->m_exitRequested = true; DestroyWindow(hwnd); }
                 else if (LOWORD(wParam) == kMenuIncreaseBlur) self->AdjustBlur(+1);
                 else if (LOWORD(wParam) == kMenuDecreaseBlur) self->AdjustBlur(-1);
+                else if (LOWORD(wParam) == kMenuStartup) self->ToggleStartupSetting();
                 return 0;
             case kTrayMessage:
                 if (lParam == WM_RBUTTONUP || lParam == WM_CONTEXTMENU) self->ShowTrayMenu();
@@ -728,6 +810,8 @@ namespace
             AppendMenuW(menu, decreaseFlags, kMenuDecreaseBlur, L"Decrease blur  (Ctrl+Alt+Down)");
             AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(menu, MF_STRING, kMenuToggle, m_enabled ? L"Pause focus blur" : L"Resume focus blur");
+            const UINT startupFlags = MF_STRING | (IsStartupShortcutEnabled() ? MF_CHECKED : 0);
+            AppendMenuW(menu, startupFlags, kMenuStartup, L"Start with Windows");
             AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(menu, MF_STRING, kMenuExit, L"Exit FocusGlass");
             HideOverlay();
@@ -735,6 +819,38 @@ namespace
             TrackPopupMenu(menu, TPM_RIGHTBUTTON | TPM_BOTTOMALIGN, point.x, point.y, 0, m_host, nullptr);
             DestroyMenu(menu);
             if (m_enabled && !m_exitRequested) ShowOverlay();
+        }
+
+        void ToggleStartupSetting()
+        {
+            const bool enable = !IsStartupShortcutEnabled();
+            try
+            {
+                SetStartupShortcutEnabled(enable);
+                if (IsStartupShortcutEnabled() != enable)
+                    throw std::runtime_error("Windows did not confirm the requested Startup setting.");
+
+                ShowBlurNotification(enable
+                    ? L"FocusGlass will start when you sign in."
+                    : L"FocusGlass will no longer start automatically.");
+                Log(enable
+                    ? L"Automatic startup enabled for the current Windows user."
+                    : L"Automatic startup disabled for the current Windows user.");
+            }
+            catch (const winrt::hresult_error& error)
+            {
+                const auto message = error.message();
+                Log(std::wstring(L"Could not update automatic startup: ") + message.c_str());
+                MessageBoxW(m_host, message.c_str(), L"FocusGlass startup setting",
+                    MB_ICONERROR | MB_OK);
+            }
+            catch (const std::exception& error)
+            {
+                const auto message = winrt::to_hstring(error.what());
+                Log(std::wstring(L"Could not update automatic startup: ") + message.c_str());
+                MessageBoxW(m_host, message.c_str(), L"FocusGlass startup setting",
+                    MB_ICONERROR | MB_OK);
+            }
         }
 
         void AdjustBlur(int delta)

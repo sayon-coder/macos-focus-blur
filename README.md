@@ -27,8 +27,9 @@ FocusGlass is an early native Windows prototype for the macOS-style focus effect
 | Decrease blur strength | Ctrl + Alt + Down |
 | Tray icon left-click | Pause / resume |
 | Tray icon right-click | Open menu |
+| Start with Windows | Tray menu → Start with Windows (checked when enabled) |
 
-Blur strength has 5 levels (1–5). Level 1 is the default and provides the lightest blur; levels above 5 are not exposed because they made the backdrop unnecessarily dark. Each press adjusts one level; the new radius is applied on the next captured frame. A Windows notification reports the current level. Blur settings currently reset to level 1 when FocusGlass is restarted. You can also right-click the tray icon and choose Increase blur or Decrease blur.
+Blur strength has 5 levels (1–5). Level 1 is the default and provides the lightest blur; levels above 5 are not exposed because they made the backdrop unnecessarily dark. Each press adjusts one level; the new radius is applied on the next captured frame. A Windows notification reports the current level. Blur settings currently reset to level 1 when FocusGlass is restarted. You can also right-click the tray icon and choose Increase blur or Decrease blur. The **Start with Windows** tray-menu item creates or removes a shortcut in the current user’s Startup folder; it takes effect at the next Windows sign-in and does not require administrator privileges. An existing `FocusGlass.lnk` shortcut created manually is recognized by the checkbox.
 
 FocusGlass enforces a **single running instance** using a named Windows mutex. Launching a second copy displays an “already running” message and exits rather than creating another capture overlay. Hotkey registration failures are logged with the Windows error code.
 
@@ -118,7 +119,7 @@ If the process becomes unresponsive, end `FocusGlass.exe` from Task Manager; its
 - Added a medium, offset, two-scale Gaussian-style drop shadow over the blurred backdrop.
 - The foreground cutout uses rounded corners.
 - Release configuration uses the statically linked MSVC runtime (/MT) to make the executable portable without Visual Studio Build Tools or a separately installed VC++ Redistributable.
-- No installer or auto-start registration is added in this version.
+- This was a limitation of the historical v0.1.4 release; the current v1.0.0 app provides a tray-menu toggle for per-user Windows sign-in startup.
 
 
 ## v0.1.5 build fix
