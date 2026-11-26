@@ -1783,6 +1783,32 @@ void FocusGlassDebugTrace(const std::wstring& message)
 {
     const std::wstring line = L"[FocusGlass pid=" +
         std::to_wstring(GetCurrentProcessId()) + L"] " + message;
+
+    // Keep a persistent trace even when Windhawk's log panel doesn't attach to
+    // the launcher/worker process. This file is diagnostic-only.
+    wchar_t tempPath[MAX_PATH]{};
+    const DWORD tempLength = GetTempPathW(ARRAYSIZE(tempPath), tempPath);
+    if (tempLength > 0 && tempLength < ARRAYSIZE(tempPath))
+    {
+        std::wstring logPath(tempPath, tempLength);
+        if (!logPath.empty() && logPath.back() != L'\\' && logPath.back() != L'/')
+            logPath.push_back(L'\\');
+        logPath += L"FocusGlass-Windhawk.log";
+
+        HANDLE file = CreateFileW(logPath.c_str(), FILE_APPEND_DATA,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file != INVALID_HANDLE_VALUE)
+        {
+            std::wstring record = line + L"\r\n";
+            DWORD written = 0;
+            WriteFile(file, record.data(),
+                static_cast<DWORD>(record.size() * sizeof(wchar_t)),
+                &written, nullptr);
+            CloseHandle(file);
+        }
+    }
+
     Wh_Log(L"%s", line.c_str());
     OutputDebugStringW(line.c_str());
     OutputDebugStringW(L"\r\n");
