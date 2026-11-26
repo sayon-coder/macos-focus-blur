@@ -1625,6 +1625,8 @@ namespace
 }
 
 
+void FocusGlassDebugTrace(const std::wstring& message);
+
 namespace
 {
     DWORD WINAPI FocusGlassWorkerThread(LPVOID)
