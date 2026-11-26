@@ -69,27 +69,33 @@ as a replacement for the standalone FocusGlass application.
 // ==/WindhawkModSettings==
 
 #include <windows.h>
-#include <windowsx.h>
 #include <shellapi.h>
 #include <dwmapi.h>
-#include <d3d11.h>
-#include <dxgi1_2.h>
-#include <windows.graphics.capture.interop.h>
-
-#include <windows.h>
 #include <d3d11.h>
 #include <d3dcompiler.h>
 #include <dxgi1_2.h>
 #include <dxgi1_3.h>
 #include <dcomp.h>
 #include <inspectable.h>
+#include <windows.graphics.capture.interop.h>
+
 #include <winrt/base.h>
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Graphics.h>
+#include <winrt/Windows.Graphics.Capture.h>
+#include <winrt/Windows.Graphics.DirectX.h>
+#include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
+
+#include <windhawk_api.h>
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
+#include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -660,28 +666,6 @@ float4 PSComposite(VertexOutput input) : SV_TARGET
     };
 #undef FOCUSGLASS_CHECK_HRESULT
 }
-
-
-#include <winrt/base.h>
-#include <winrt/Windows.Foundation.h>
-#include <winrt/Windows.Graphics.h>
-#include <winrt/Windows.Graphics.Capture.h>
-#include <winrt/Windows.Graphics.DirectX.h>
-#include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
-#include <windhawk_api.h>
-
-#include <algorithm>
-#include <array>
-#include <atomic>
-#include <chrono>
-#include <cstring>
-#include <cstdint>
-#include <cmath>
-#include <memory>
-#include <mutex>
-#include <string>
-#include <stdexcept>
-#include <vector>
 
 
 namespace
