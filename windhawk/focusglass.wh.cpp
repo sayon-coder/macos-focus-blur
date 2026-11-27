@@ -59,6 +59,12 @@ capture starts immediately when Windhawk loads the mod.
 - Requires a GPU driver supporting Direct3D 11, DirectComposition and Windows
   Graphics Capture.
 
+## Startup troubleshooting
+
+The mod must be allowed to load into `windhawk.exe`. If you have configured a
+restrictive global Process exclusion list in Windhawk, add `windhawk.exe` to the
+Process inclusion list so the Tool Mod launcher can start.
+
 ## Privacy
 
 Desktop frames are captured and processed locally. The mod does not save captured
