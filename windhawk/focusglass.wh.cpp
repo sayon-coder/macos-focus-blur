@@ -3,11 +3,11 @@
 // @name            FocusGlass
 // @description     macOS-style GPU background blur for overlapping desktop windows
 // @version         0.1.0
-// @author           SAYON BISWAS
+// @author          SAYON BISWAS
 // @github          https://github.com/sayon-coder
 // @homepage        https://github.com/sayon-coder/macos-focus-blur
 // @include         windhawk.exe
-// @architecture    x86-64
+// @architecture    x86
 // @compilerOptions -ld3d11 -ldxgi -ldcomp -ld3dcompiler -ldwmapi -lwindowsapp -lruntimeobject -lshell32 -lole32 -luuid -luser32
 // @license         MIT
 // ==/WindhawkMod==
@@ -25,8 +25,8 @@ behind the active application window when it overlaps another application window
 - DirectComposition premultiplied-alpha overlay.
 - Blur only when a lower-z-order application window overlaps the active window.
   Side-by-side windows stay sharp.
-- Rounded active-window cutout, clear taskbars and a configurable top safe area
-  retained for desktop menu bars.
+- Rounded active-window cutout, clear taskbars and owned popups, plus a fixed
+  30-pixel top safe area reserved for desktop menu bars.
 - Soft foreground shadow.
 - Click-through overlay and screen-capture exclusion.
 - Tray icon and global hotkeys.
@@ -48,12 +48,23 @@ and shutdown; no separate Startup shortcut is needed.
 hotkeys can adjust it for the current run. **Start paused** controls whether
 capture starts immediately when Windhawk loads the mod.
 
-## Compatibility
+## Compatibility and limitations
 
-Windows 10 2004 or later / Windows 11. A GPU and driver supporting Direct3D 11,
-DirectComposition and Windows Graphics Capture are required. This is an early
-port: compile and runtime validation on the target PC are required before use
-as a replacement for the standalone FocusGlass application.
+- Intended for Windows 10 version 2004 or later and Windows 11.
+- Validated by the author on Windows 11 with Windhawk 1.7.3 stable.
+- This release targets the x86 `windhawk.exe` host and uses Windhawk's 1.7.3
+  dedicated Tool Mod compatibility mechanism.
+- The blur currently captures the primary monitor only.
+- Restart the mod after changing the display topology or display resolution.
+- Requires a GPU driver supporting Direct3D 11, DirectComposition and Windows
+  Graphics Capture.
+
+## Privacy
+
+Desktop frames are captured and processed locally. The mod does not save captured
+frames to disk or transmit them over the network. Installing it through Windhawk
+is self-contained: the standalone `FocusGlass.exe` and development repository
+are not required.
 */
 // ==/WindhawkModReadme==
 
@@ -1134,20 +1145,24 @@ namespace
         EnumWindows(EnumOwnedPopups, reinterpret_cast<LPARAM>(&popupContext));
 
         // Keep the Windows taskbar and secondary taskbars crisp.
-        struct TaskbarContext { std::vector<RECT>* regions; } taskbarContext{ &layout.clearRegions };
-        EnumWindows([](HWND hwnd, LPARAM param) -> BOOL
+        struct TaskbarEnum
         {
-            wchar_t className[128]{};
-            GetClassNameW(hwnd, className, ARRAYSIZE(className));
-            if (wcscmp(className, L"Shell_TrayWnd") == 0 ||
-                wcscmp(className, L"Shell_SecondaryTrayWnd") == 0)
+            std::vector<RECT>* regions;
+            static BOOL CALLBACK Proc(HWND hwnd, LPARAM param)
             {
-                RECT rect{};
-                if (GetWindowRect(hwnd, &rect))
-                    reinterpret_cast<TaskbarContext*>(param)->regions->push_back(rect);
+                wchar_t className[128]{};
+                GetClassNameW(hwnd, className, ARRAYSIZE(className));
+                if (wcscmp(className, L"Shell_TrayWnd") == 0 ||
+                    wcscmp(className, L"Shell_SecondaryTrayWnd") == 0)
+                {
+                    RECT rect{};
+                    if (GetWindowRect(hwnd, &rect))
+                        reinterpret_cast<TaskbarEnum*>(param)->regions->push_back(rect);
+                }
+                return TRUE;
             }
-            return TRUE;
-        }, reinterpret_cast<LPARAM>(&taskbarContext));
+        } taskbarContext{ &layout.clearRegions };
+        EnumWindows(TaskbarEnum::Proc, reinterpret_cast<LPARAM>(&taskbarContext));
 
         // Preserve the user's custom macOS-style menu bar near the top edge.
         layout.clearRegions.push_back(RECT{ monitor.bounds.left, monitor.bounds.top,
@@ -1781,37 +1796,7 @@ HANDLE g_toolModProcessMutex = nullptr;
 
 void FocusGlassDebugTrace(const std::wstring& message)
 {
-    const std::wstring line = L"[FocusGlass pid=" +
-        std::to_wstring(GetCurrentProcessId()) + L"] " + message;
-
-    // Keep a persistent trace even when Windhawk's log panel doesn't attach to
-    // the launcher/worker process. This file is diagnostic-only.
-    wchar_t tempPath[MAX_PATH]{};
-    const DWORD tempLength = GetTempPathW(ARRAYSIZE(tempPath), tempPath);
-    if (tempLength > 0 && tempLength < ARRAYSIZE(tempPath))
-    {
-        std::wstring logPath(tempPath, tempLength);
-        if (!logPath.empty() && logPath.back() != L'\\' && logPath.back() != L'/')
-            logPath.push_back(L'\\');
-        logPath += L"FocusGlass-Windhawk.log";
-
-        HANDLE file = CreateFileW(logPath.c_str(), FILE_APPEND_DATA,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (file != INVALID_HANDLE_VALUE)
-        {
-            std::wstring record = line + L"\r\n";
-            DWORD written = 0;
-            WriteFile(file, record.data(),
-                static_cast<DWORD>(record.size() * sizeof(wchar_t)),
-                &written, nullptr);
-            CloseHandle(file);
-        }
-    }
-
-    Wh_Log(L"%s", line.c_str());
-    OutputDebugStringW(line.c_str());
-    OutputDebugStringW(L"\r\n");
+    Wh_Log(L"%s", message.c_str());
 }
 
 void WINAPI EntryPoint_Hook()
